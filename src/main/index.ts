@@ -1,4 +1,6 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, desktopCapturer } from 'electron'
+import { writeFileSync, mkdtempSync } from 'fs'
+import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -138,6 +140,36 @@ function registerIpc(): void {
     'pit:share:fetch-asset',
     (_e, input: { code: string; asset: string }) =>
       fetchAssetAsDataUrl(input.code, input.asset)
+  )
+
+  // Screen recording — list capture sources (screens + windows) so the
+  // renderer's RecordModal picker can show them with thumbnails.
+  ipcMain.handle(
+    'pit:capture:list-sources',
+    async (): Promise<{ id: string; name: string; thumbnail: string; kind: 'screen' | 'window' }[]> => {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 320, height: 200 }
+      })
+      return sources.map((s) => ({
+        id: s.id,
+        name: s.name,
+        thumbnail: s.thumbnail.toDataURL(),
+        kind: s.id.startsWith('screen:') ? 'screen' : 'window'
+      }))
+    }
+  )
+
+  // Save a recorded video blob (webm bytes from MediaRecorder) to a tmp file
+  // and return the path — main reuses extractKeyframes(path) afterwards.
+  ipcMain.handle(
+    'pit:capture:save-blob',
+    (_e, input: { bytes: Uint8Array; ext?: string }): { path: string; sizeBytes: number } => {
+      const dir = mkdtempSync(join(tmpdir(), 'pit-rec-'))
+      const path = join(dir, `recording.${input.ext || 'webm'}`)
+      writeFileSync(path, Buffer.from(input.bytes))
+      return { path, sizeBytes: input.bytes.byteLength }
+    }
   )
 
   // Video import — extract keyframes from a local file path (preferred) or

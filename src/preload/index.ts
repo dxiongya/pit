@@ -105,6 +105,15 @@ const pit = {
       uniqueCount: number
     }> => ipcRenderer.invoke('pit:video:extract', input)
   },
+  // Screen capture — list sources (screens + windows) + persist a recorded
+  // blob to a tmp path so the existing video.extract pipeline can consume it.
+  capture: {
+    listSources: (): Promise<
+      { id: string; name: string; thumbnail: string; kind: 'screen' | 'window' }[]
+    > => ipcRenderer.invoke('pit:capture:list-sources'),
+    saveBlob: (input: { bytes: Uint8Array; ext?: string }): Promise<{ path: string; sizeBytes: number }> =>
+      ipcRenderer.invoke('pit:capture:save-blob', input)
+  },
   // Get the absolute filesystem path of a File from a drag/drop or paste —
   // Electron-only, replaces the deprecated `file.path` property.
   pathForFile: (file: File): string => webUtils.getPathForFile(file),

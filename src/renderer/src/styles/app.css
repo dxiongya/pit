@@ -441,6 +441,27 @@ body[data-cols="6"] .masonry { --cols: 6; }
   background-position: center;
 }
 
+/* Record button + recording-in-progress indicator — small red dot that
+ * pulses while a recording is active. Reused in TopBar (idle, static) and
+ * in RecordModal title (recording, animated). */
+.rec-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: #ff453a;
+  box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.5);
+}
+.share-modal h3 .rec-dot {
+  margin-right: 8px;
+  animation: rec-pulse 1.4s ease-out infinite;
+  vertical-align: middle;
+}
+@keyframes rec-pulse {
+  0%   { box-shadow: 0 0 0 0   rgba(255, 69, 58, 0.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(255, 69, 58, 0);   }
+  100% { box-shadow: 0 0 0 0   rgba(255, 69, 58, 0);   }
+}
+
 /* Video kind — badge in the top-left of the cover showing frame count. The
  * card is otherwise indistinguishable from an image so the masonry stays
  * visually uniform. */
