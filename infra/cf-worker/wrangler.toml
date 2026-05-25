@@ -1,0 +1,21 @@
+name = "pit-share-api"
+main = "src/worker.ts"
+compatibility_date = "2025-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1: share metadata (code → items, password hash, expiry, views).
+[[d1_databases]]
+binding = "DB"
+database_name = "pit-shares-db"
+# database_id filled in by `wrangler d1 create` step.
+database_id = "e5a48da9-5897-4c4f-829f-c6e83df44028"
+
+# R2: blob storage (image data, page thumbnails).
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "pit-shares"
+
+[vars]
+# Public origin used to build share URLs returned by the API. Override with
+# `wrangler.toml [env.prod]` once the pit.ink custom domain is bound.
+PUBLIC_ORIGIN = "https://pit.ink"

@@ -1,0 +1,3 @@
+# SPA: every non-asset path falls through to index.html so client-side routing
+# can pick it up. Asset paths (with extensions) are served directly by Pages.
+/*    /index.html    200
