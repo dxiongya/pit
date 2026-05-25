@@ -190,8 +190,13 @@ interface StoreValue {
   importLink: (url: string) => void
   importImage: (dataUrl: string) => void
   /** Drag-to-import a video file (by local path). Extracts keyframes in main,
-   *  routes through AI for motion analysis (Phase 2). */
-  importVideo: (path: string, originalName?: string) => void
+   *  routes through AI for motion analysis (Phase 2). cropRect (recorder
+   *  region mode) is forwarded to ffmpeg before keyframe sampling. */
+  importVideo: (
+    path: string,
+    originalName?: string,
+    cropRect?: { x: number; y: number; w: number; h: number }
+  ) => void
 }
 
 interface PersistBridge {
@@ -492,7 +497,11 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
   // so the existing detail/share plumbing renders them as-is. Phase 2 will route
   // through analyzeVideo for motion-aware AI.
   const importVideo = useCallback(
-    (path: string, originalName?: string) => {
+    (
+      path: string,
+      originalName?: string,
+      cropRect?: { x: number; y: number; w: number; h: number }
+    ) => {
       const id = uid()
       const title =
         originalName?.replace(/\.[^.]+$/, '') ||
@@ -513,8 +522,9 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
       let stream = ''
       void (async () => {
         try {
-          // Phase 1 — frame extraction (ffmpeg in main).
-          const r = await window.pit.video.extract({ path, target: 8 })
+          // Phase 1 — frame extraction (ffmpeg in main, optional crop for
+          // recorder region mode).
+          const r = await window.pit.video.extract({ path, target: 8, cropRect })
           const pages = r.frames.map((f, i) => ({
             name: `Frame ${i + 1}`,
             status: 'done' as const,

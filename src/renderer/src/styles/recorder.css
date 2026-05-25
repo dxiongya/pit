@@ -1,0 +1,241 @@
+/* recorder.css — accessory window styles (float widget, border, region picker).
+ * Each style block is scoped to its #/recorder-* route's root element.
+ */
+
+/* Float widget container — small pill, dark glass, drag-to-move. */
+.rec-float {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100vh;
+  padding: 0 14px;
+  background: rgba(20, 20, 22, 0.92);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Helvetica Neue', sans-serif;
+  font-size: 13px;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Allow dragging anywhere on the bar except interactive controls */
+  -webkit-app-region: drag;
+}
+.rec-float-drag {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.25) 0 2px,
+    transparent 2px 5px
+  );
+  border-radius: 2px;
+  opacity: 0.6;
+}
+.rec-float-pulse {
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff453a;
+  box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.55);
+  animation: rec-float-pulse 1.4s ease-out infinite;
+}
+.rec-float-pulse.paused {
+  animation: none;
+  background: #6e6e73;
+  box-shadow: none;
+}
+@keyframes rec-float-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(255, 69, 58, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 69, 58, 0);
+  }
+}
+.rec-float-time {
+  flex: 1;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+.rec-float-btn {
+  -webkit-app-region: no-drag;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    transform 0.08s ease;
+}
+.rec-float-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.rec-float-btn:active {
+  transform: scale(0.94);
+}
+.rec-float-btn.stop {
+  background: #ff453a;
+  color: #fff;
+  border-color: transparent;
+}
+.rec-float-btn.stop:hover {
+  background: #ff584d;
+}
+
+/* Border overlay — thin red frame around the captured display. The body
+ * must be transparent so the overlay shows the underlying screen. Scoped to
+ * recorder windows so the main pit window keeps its solid background. */
+body.recorder-mode {
+  margin: 0;
+  background: transparent !important;
+}
+body.recorder-mode #root,
+body.recorder-mode html {
+  background: transparent !important;
+}
+.rec-border {
+  position: fixed;
+  inset: 0;
+  border: 4px solid #ff453a;
+  border-radius: 2px;
+  pointer-events: none;
+  box-sizing: border-box;
+  box-shadow:
+    inset 0 0 12px rgba(255, 69, 58, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.15);
+  animation: rec-border-pulse 2.2s ease-in-out infinite;
+}
+@keyframes rec-border-pulse {
+  0%,
+  100% {
+    border-color: #ff453a;
+    box-shadow:
+      inset 0 0 12px rgba(255, 69, 58, 0.18),
+      0 0 0 1px rgba(0, 0, 0, 0.15);
+  }
+  50% {
+    border-color: #ff8a82;
+    box-shadow:
+      inset 0 0 22px rgba(255, 69, 58, 0.28),
+      0 0 0 1px rgba(0, 0, 0, 0.15);
+  }
+}
+
+/* Region picker — full-screen drag-rect overlay. */
+.rec-region {
+  position: fixed;
+  inset: 0;
+  cursor: crosshair;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Helvetica Neue', sans-serif;
+  color: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.rec-region-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(1.5px);
+  -webkit-backdrop-filter: blur(1.5px);
+}
+.rec-region-hole {
+  position: absolute;
+  background: transparent;
+  /* Cut out the dim layer with a giant shadow trick — the selected area stays
+   * fully transparent (so the user sees what they're about to capture). */
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.42);
+}
+.rec-region-frame {
+  position: absolute;
+  border: 2px solid #ff453a;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.4),
+    0 0 12px rgba(255, 69, 58, 0.5);
+  pointer-events: none;
+}
+.rec-region-dim-text {
+  position: absolute;
+  top: -22px;
+  left: 0;
+  background: #ff453a;
+  color: #fff;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.rec-region-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  background: rgba(20, 20, 22, 0.85);
+  padding: 14px 22px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 14px;
+}
+.rec-region-hint-row {
+  margin: 2px 0;
+}
+.rec-region-hint-row.muted {
+  opacity: 0.6;
+  font-size: 12px;
+}
+.rec-region-confirmbar {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: rgba(20, 20, 22, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  z-index: 10;
+}
+.rec-region-btn {
+  -webkit-app-region: no-drag;
+  height: 30px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Helvetica Neue', sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rec-region-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.rec-region-btn.primary {
+  background: #ff453a;
+  border-color: transparent;
+}
+.rec-region-btn.primary:hover {
+  background: #ff584d;
+}

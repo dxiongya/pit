@@ -42,9 +42,18 @@ export interface ExtractResult {
   uniqueCount: number
 }
 
+export interface CropRect {
+  /** Display-CSS-px rectangle to crop each frame to before scaling. */
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export async function extractKeyframes(
   videoSource: string | Buffer,
-  target = 8
+  target = 8,
+  cropRect?: CropRect
 ): Promise<ExtractResult> {
   const tmpDir = mkdtempSync(join(tmpdir(), 'pit-video-'))
   let inputPath: string
@@ -66,6 +75,16 @@ export async function extractKeyframes(
     // Extract candidates at evenly-spaced timestamps within the video. Skip
     // the very-edge moments (0 and full duration) — they often catch the
     // black tail/first chroma frame of the encoder.
+    // Build the -vf chain: optional crop first, then scale-down to ≤1280px.
+    const vfParts: string[] = []
+    if (cropRect && cropRect.w > 0 && cropRect.h > 0) {
+      vfParts.push(
+        `crop=${Math.round(cropRect.w)}:${Math.round(cropRect.h)}:${Math.round(cropRect.x)}:${Math.round(cropRect.y)}`
+      )
+    }
+    vfParts.push(`scale='min(${FRAME_MAX_WIDTH},iw)':-2`)
+    const vfChain = vfParts.join(',')
+
     const candidates: string[] = []
     for (let i = 0; i < CANDIDATE_COUNT; i++) {
       const ts = (duration * (i + 0.5)) / CANDIDATE_COUNT
@@ -79,7 +98,7 @@ export async function extractKeyframes(
         '-frames:v',
         '1',
         '-vf',
-        `scale='min(${FRAME_MAX_WIDTH},iw)':-2`,
+        vfChain,
         outPath
       ])
       const bytes = readFileSync(outPath)

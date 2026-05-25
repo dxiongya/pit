@@ -96,9 +96,12 @@ const pit = {
   // Video — extract keyframes (8 by default) from a local path. The dedup
   // happens in main so we don't waste IPC bandwidth on duplicate frames.
   video: {
-    extract: (
-      input: { path?: string; buffer?: Uint8Array; target?: number }
-    ): Promise<{
+    extract: (input: {
+      path?: string
+      buffer?: Uint8Array
+      target?: number
+      cropRect?: { x: number; y: number; w: number; h: number }
+    }): Promise<{
       frames: string[]
       durationSec: number
       candidateCount: number
@@ -113,6 +116,41 @@ const pit = {
     > => ipcRenderer.invoke('pit:capture:list-sources'),
     saveBlob: (input: { bytes: Uint8Array; ext?: string }): Promise<{ path: string; sizeBytes: number }> =>
       ipcRenderer.invoke('pit:capture:save-blob', input)
+  },
+  // Recorder chrome — float widget + border overlay + region picker. Used by
+  // RecordModal in the main window and by the small accessory windows loaded
+  // with #/recorder-* hash routes.
+  rec: {
+    startChrome: (opts: { mode: 'screen' | 'window' | 'region'; displayId?: number }): Promise<void> =>
+      ipcRenderer.invoke('pit:rec:start-chrome', opts),
+    stopChrome: (): Promise<void> => ipcRenderer.invoke('pit:rec:stop-chrome'),
+    pickRegion: (): Promise<
+      { x: number; y: number; w: number; h: number; displayId: number } | null
+    > => ipcRenderer.invoke('pit:rec:pick-region'),
+    // Float widget sends a control command (pause/resume/stop) to be relayed
+    // back to the main window's MediaRecorder. Send (not invoke) — fire-and-forget.
+    sendControl: (cmd: 'pause' | 'resume' | 'stop'): void =>
+      ipcRenderer.send('pit:rec:control', cmd),
+    // Main window pushes live state (elapsed + paused) to the float widget.
+    pushState: (state: { elapsedMs: number; paused: boolean }): void =>
+      ipcRenderer.send('pit:rec:push-state', state),
+    // Subscribe to control commands relayed from the float widget into the
+    // main window (RecordModal listens).
+    onCommand: (cb: (cmd: 'pause' | 'resume' | 'stop') => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, c: 'pause' | 'resume' | 'stop'): void => cb(c)
+      ipcRenderer.on('pit:rec:command', listener)
+      return () => ipcRenderer.removeListener('pit:rec:command', listener)
+    },
+    // Subscribe to state pushes (float widget listens).
+    onState: (cb: (state: { elapsedMs: number; paused: boolean }) => void): (() => void) => {
+      const listener = (_e: IpcRendererEvent, s: { elapsedMs: number; paused: boolean }): void =>
+        cb(s)
+      ipcRenderer.on('pit:rec:state', listener)
+      return () => ipcRenderer.removeListener('pit:rec:state', listener)
+    },
+    // Region picker sends its result back to main via send().
+    sendRegionResult: (rect: { x: number; y: number; w: number; h: number } | null): void =>
+      ipcRenderer.send('pit:rec:region-result', rect)
   },
   // Get the absolute filesystem path of a File from a drag/drop or paste —
   // Electron-only, replaces the deprecated `file.path` property.

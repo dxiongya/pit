@@ -441,6 +441,93 @@ body[data-cols="6"] .masonry { --cols: 6; }
   background-position: center;
 }
 
+/* RecordModal picker — mode tabs (Screen / Window / Region) + audio toggle.
+ * Lives in the share-modal shell so spacing matches the rest of the modal. */
+.rec-mode-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 3px;
+  background: var(--bg-soft);
+  border-radius: 8px;
+}
+.rec-mode-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--f-ui);
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.rec-mode-tab:hover {
+  color: var(--ink);
+}
+.rec-mode-tab.active {
+  background: var(--bg-card);
+  color: var(--ink);
+  box-shadow: var(--sh-1);
+}
+.rec-audio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+}
+.rec-audio-row input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+.rec-source-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--f-ui);
+  color: var(--ink);
+  transition:
+    border-color 0.12s ease,
+    transform 0.08s ease;
+}
+.rec-source-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.rec-region-cta {
+  margin-top: 18px;
+  padding: 24px;
+  background: var(--bg-soft);
+  border: 1px dashed var(--hair-2);
+  border-radius: var(--r-md);
+  text-align: center;
+}
+.rec-modal-timer {
+  margin: 20px 0;
+  padding: 20px;
+  background: var(--bg-soft);
+  border-radius: 10px;
+  text-align: center;
+  font-family: var(--f-mono);
+  font-size: 32px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
 /* Record button + recording-in-progress indicator — small red dot that
  * pulses while a recording is active. Reused in TopBar (idle, static) and
  * in RecordModal title (recording, animated). */

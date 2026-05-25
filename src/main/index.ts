@@ -32,6 +32,13 @@ import {
   fetchAssetAsDataUrl
 } from './share'
 import { extractKeyframes, type ExtractResult } from './video'
+import {
+  startRecorderChrome,
+  stopRecorderChrome,
+  pickRegion,
+  relayControl,
+  pushFloatState
+} from './recorder-windows'
 
 function createWindow(): void {
   const isMac = process.platform === 'darwin'
@@ -160,6 +167,25 @@ function registerIpc(): void {
     }
   )
 
+  // Recorder chrome — orchestrates the floating control widget, the border
+  // overlay, and main-window minimize/restore around a recording session.
+  // MediaRecorder itself stays in the main window's RecordModal renderer.
+  ipcMain.handle(
+    'pit:rec:start-chrome',
+    (_e, opts: { mode: 'screen' | 'window' | 'region'; displayId?: number }) => {
+      startRecorderChrome(opts)
+    }
+  )
+  ipcMain.handle('pit:rec:stop-chrome', () => stopRecorderChrome())
+  // Region picker — resolves with the user's drawn rect, or null on Esc.
+  ipcMain.handle('pit:rec:pick-region', () => pickRegion())
+  // Float widget → main: control commands relayed through main process.
+  ipcMain.on('pit:rec:control', (_e, cmd: 'pause' | 'resume' | 'stop') => relayControl(cmd))
+  // Main window → main: push live state to float widget.
+  ipcMain.on('pit:rec:push-state', (_e, state: { elapsedMs: number; paused: boolean }) =>
+    pushFloatState(state)
+  )
+
   // Save a recorded video blob (webm bytes from MediaRecorder) to a tmp file
   // and return the path — main reuses extractKeyframes(path) afterwards.
   ipcMain.handle(
@@ -177,9 +203,17 @@ function registerIpc(): void {
   // never persisted; only the deduped keyframes survive.
   ipcMain.handle(
     'pit:video:extract',
-    (_e, input: { path?: string; buffer?: Uint8Array; target?: number }): Promise<ExtractResult> => {
+    (
+      _e,
+      input: {
+        path?: string
+        buffer?: Uint8Array
+        target?: number
+        cropRect?: { x: number; y: number; w: number; h: number }
+      }
+    ): Promise<ExtractResult> => {
       const source = input.path ?? Buffer.from(input.buffer ?? new Uint8Array())
-      return extractKeyframes(source, input.target ?? 8)
+      return extractKeyframes(source, input.target ?? 8, input.cropRect)
     }
   )
 
