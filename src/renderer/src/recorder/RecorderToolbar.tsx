@@ -72,15 +72,18 @@ export function RecorderToolbar(): React.JSX.Element {
   const screens = sources.filter((s) => s.kind === 'screen')
   const windows = sources.filter((s) => s.kind === 'window')
 
-  // Compute readiness — Display always; Window needs a chosen window; Area
-  // needs a picked rect.
+  // Compute readiness + the selection preview shown next to the mode tabs.
   let chosenLabel: string | null = null
+  let chosenThumb: string | null = null
   if (mode === 'display') {
     chosenLabel = screens[0]?.name || 'Display'
+    chosenThumb = screens[0]?.thumbnail || null
   } else if (mode === 'window') {
-    chosenLabel = windows.find((w) => w.id === chosenSourceId)?.name || null
+    const w = windows.find((win) => win.id === chosenSourceId)
+    chosenLabel = w?.name || null
+    chosenThumb = w?.thumbnail || null
   } else if (mode === 'area') {
-    chosenLabel = areaRect ? `Area ${areaRect.w}×${areaRect.h}` : null
+    chosenLabel = areaRect ? `Area ${areaRect.w} × ${areaRect.h}` : null
   }
   const ready = chosenLabel != null
 
@@ -174,6 +177,25 @@ export function RecorderToolbar(): React.JSX.Element {
       <div className="rec-tb-sep" />
 
       <div className="rec-tb-spacer" />
+
+      {chosenLabel && (
+        <button
+          type="button"
+          className="rec-tb-selection"
+          onClick={() => {
+            if (mode === 'window') setPopoverOpen(true)
+            else if (mode === 'area') void pickArea()
+          }}
+          title={`Click to re-pick — ${chosenLabel}`}
+        >
+          {chosenThumb ? (
+            <img src={chosenThumb} alt="" />
+          ) : (
+            <span className="rec-tb-selection-glyph">▢</span>
+          )}
+          <span className="rec-tb-selection-label">{chosenLabel}</span>
+        </button>
+      )}
 
       <button
         type="button"

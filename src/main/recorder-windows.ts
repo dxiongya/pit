@@ -35,7 +35,7 @@ function preloadPath(): string {
 }
 
 /** Find the main pit window — anything that isn't one of our accessory windows. */
-function findMainWindow(): BrowserWindow | null {
+export function findMainWindow(): BrowserWindow | null {
   return (
     BrowserWindow.getAllWindows().find(
       (w) => w !== floatWin && w !== borderWin && w !== regionWin && w !== toolbarWin
@@ -108,6 +108,10 @@ interface StartOpts {
   /** When mode is 'screen' or 'region', the display whose bounds we should
    *  overlay with the border indicator. Defaults to primary. */
   displayId?: number
+  /** For region mode — the user-picked rect on the display. The persistent
+   *  border window is sized to this rect so the user can see what's being
+   *  recorded throughout the session. */
+  regionRect?: { x: number; y: number; w: number; h: number }
 }
 
 export function startRecorderChrome(opts: StartOpts): void {
@@ -146,9 +150,11 @@ export function startRecorderChrome(opts: StartOpts): void {
   floatWin.loadURL(rendererUrl('/recorder-control'))
   floatWin.once('ready-to-show', () => floatWin?.show())
 
-  // Border overlay — visual frame around the captured area. Only for screen +
-  // region modes (window mode already has the window's own focus indicator).
-  if (opts.mode === 'screen' || opts.mode === 'region') {
+  // Border overlay — visual frame around the captured area. Window mode skips
+  // it (the captured window's own focus ring is enough); screen + region both
+  // get an overlay so the user always sees what's being recorded.
+  if (opts.mode === 'screen') {
+    // Whole-display capture: fullscreen click-through frame.
     const target =
       opts.displayId != null
         ? screen.getAllDisplays().find((d) => d.id === opts.displayId) || primary
@@ -179,6 +185,43 @@ export function startRecorderChrome(opts: StartOpts): void {
     borderWin.setAlwaysOnTop(true, 'screen-saver')
     borderWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     borderWin.loadURL(rendererUrl('/recorder-border'))
+    borderWin.once('ready-to-show', () => borderWin?.show())
+  } else if (opts.mode === 'region' && opts.regionRect) {
+    // Region capture: a dashed-border window sized to the rect itself, so the
+    // user sees the exact bounds throughout the recording. The window is
+    // slightly larger than the rect to make room for the border without
+    // covering content (border drawn inset).
+    const r = opts.regionRect
+    const target =
+      opts.displayId != null
+        ? screen.getAllDisplays().find((d) => d.id === opts.displayId) || primary
+        : primary
+    borderWin = new BrowserWindow({
+      x: target.bounds.x + r.x,
+      y: target.bounds.y + r.y,
+      width: r.w,
+      height: r.h,
+      frame: false,
+      transparent: true,
+      hasShadow: false,
+      alwaysOnTop: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      focusable: false,
+      skipTaskbar: true,
+      show: false,
+      webPreferences: {
+        preload: preloadPath(),
+        sandbox: false
+      }
+    })
+    borderWin.setIgnoreMouseEvents(true, { forward: true })
+    borderWin.setAlwaysOnTop(true, 'screen-saver')
+    borderWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    borderWin.loadURL(rendererUrl('/recorder-region-border'))
     borderWin.once('ready-to-show', () => borderWin?.show())
   }
 }

@@ -39,7 +39,8 @@ import {
   relayControl,
   pushFloatState,
   openToolbar,
-  closeToolbar
+  closeToolbar,
+  findMainWindow
 } from './recorder-windows'
 
 function createWindow(): void {
@@ -185,12 +186,18 @@ function registerIpc(): void {
       cropRect?: { x: number; y: number; w: number; h: number }
       sourceLabel?: string
     }) => {
-      // Close toolbar; spawn float + border. Then ask main pit window to
-      // initiate the actual MediaRecorder.
-      closeToolbar()
-      startRecorderChrome({ mode: opts.mode })
-      const main = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+      // CRITICAL — fire pit:rec:begin BEFORE spawning the float/border so
+      // findMainWindow() can't accidentally pick an accessory window. Then
+      // start the chrome (which spawns float + border).
+      const main = findMainWindow()
       if (main) main.webContents.send('pit:rec:begin', opts)
+      closeToolbar()
+      startRecorderChrome({
+        mode: opts.mode,
+        // For region mode, pass the picked rect through so the persistent
+        // border window can be sized exactly to it.
+        regionRect: opts.mode === 'region' ? opts.cropRect : undefined
+      })
     }
   )
   // Toolbar cancel — closes toolbar; restore happens in toolbar 'closed' hook.

@@ -7,6 +7,7 @@ import App from './App'
 import { RecorderControl } from './recorder/RecorderControl'
 import { RecorderBorder } from './recorder/RecorderBorder'
 import { RegionPicker } from './recorder/RegionPicker'
+import { RegionBorder } from './recorder/RegionBorder'
 import { RecorderToolbar } from './recorder/RecorderToolbar'
 
 // Hash routing — accessory recorder windows load the same renderer build
@@ -25,6 +26,9 @@ if (hash === '#/recorder-toolbar') {
 } else if (hash === '#/recorder-region') {
   document.body.classList.add('recorder-mode')
   element = <RegionPicker />
+} else if (hash === '#/recorder-region-border') {
+  document.body.classList.add('recorder-mode')
+  element = <RegionBorder />
 } else {
   element = <App />
 }

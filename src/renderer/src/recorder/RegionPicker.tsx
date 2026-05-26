@@ -85,15 +85,19 @@ export function RegionPicker(): React.JSX.Element {
 
   return (
     <div className="rec-region" onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}>
-      <div className="rec-region-dim" />
+      {/* When no rect exists, show the full-screen dim. Once a rect is drawn,
+          only dim the area OUTSIDE the rect — the inside stays fully clear so
+          the user sees exactly what's about to be captured. */}
+      {!visible && <div className="rec-region-dim" />}
       {visible && (
         <>
-          {/* The "hole" that punches the dim layer where the rect is. We layer
-              brighter rect borders on top so the selection reads clearly. */}
+          {/* The "hole" element is a transparent rect whose massive outset
+              box-shadow paints the dim around it. Center stays untouched. */}
           <div
             className="rec-region-hole"
             style={{ left: visible.x, top: visible.y, width: visible.w, height: visible.h }}
           />
+          {/* Dashed marching-ants border on top of the hole. */}
           <div
             className="rec-region-frame"
             style={{ left: visible.x, top: visible.y, width: visible.w, height: visible.h }}

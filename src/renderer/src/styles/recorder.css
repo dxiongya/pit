@@ -121,6 +121,55 @@
   flex: 1;
   min-width: 12px;
 }
+/* Selection chip — sits between the spacer and Start, shows what the user
+ * picked so they confirm what's about to be recorded. Click to re-pick. */
+.rec-tb-selection {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px 0 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  max-width: 220px;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+.rec-tb-selection:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.rec-tb-selection img {
+  width: 40px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex: 0 0 40px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.rec-tb-selection-glyph {
+  width: 40px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  flex: 0 0 40px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+}
+.rec-tb-selection-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .rec-tb-start {
   display: inline-flex;
   align-items: center;
@@ -377,6 +426,21 @@ body.recorder-mode html {
   }
 }
 
+/* Persistent region indicator — sized to the captured rect, dashed border,
+ * shown for the entire recording so the user knows the bounds. The window
+ * itself is click-through (set from main); only the outline is visible. */
+.rec-region-live {
+  position: fixed;
+  inset: 0;
+  border: 2px dashed #ff453a;
+  box-sizing: border-box;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 0 14px rgba(255, 69, 58, 0.45);
+  pointer-events: none;
+}
+
 /* Region picker — full-screen drag-rect overlay. */
 .rec-region {
   position: fixed;
@@ -404,11 +468,19 @@ body.recorder-mode html {
 }
 .rec-region-frame {
   position: absolute;
-  border: 2px solid #ff453a;
+  border: 2px dashed #ff453a;
+  /* Dual outline gives the dashes legibility on bright AND dark backgrounds */
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.4),
-    0 0 12px rgba(255, 69, 58, 0.5);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 0 14px rgba(255, 69, 58, 0.4);
   pointer-events: none;
+  animation: rec-march 0.6s linear infinite;
+}
+@keyframes rec-march {
+  to {
+    background-position: 8px 0;
+  }
 }
 .rec-region-dim-text {
   position: absolute;
