@@ -89,12 +89,16 @@ export async function extractKeyframes(
     for (let i = 0; i < CANDIDATE_COUNT; i++) {
       const ts = (duration * (i + 0.5)) / CANDIDATE_COUNT
       const outPath = join(tmpDir, `f-${i}.png`)
+      // -ss AFTER -i = accurate seek (walks from start). For MediaRecorder
+      // webm files this is the only reliable way; the fast pre-input seek
+      // can land on the wrong frame when the container has no keyframe index.
+      // The walk cost is negligible for the short recordings we target.
       await runFfmpeg([
         '-y',
-        '-ss',
-        String(ts),
         '-i',
         inputPath,
+        '-ss',
+        String(ts),
         '-frames:v',
         '1',
         '-vf',
@@ -165,15 +169,30 @@ async function probeDuration(path: string): Promise<number> {
     p.stderr.on('data', (d) => {
       stderr += d.toString()
     })
-    // ffmpeg returns non-zero when input has no output target, but the duration
-    // is printed in the header before processing, so we ignore the exit code.
     p.on('close', () => {
-      const m = stderr.match(/Duration:\s*(\d+):(\d+):([\d.]+)/)
-      if (!m) {
-        reject(new Error(`probe failed: ${stderr.slice(-300)}`))
+      // Most mp4/mov files report Duration in the header before processing.
+      const headerM = stderr.match(/Duration:\s*(\d+):(\d+):([\d.]+)/)
+      if (headerM) {
+        resolve(
+          parseInt(headerM[1], 10) * 3600 +
+            parseInt(headerM[2], 10) * 60 +
+            parseFloat(headerM[3])
+        )
         return
       }
-      resolve(parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseFloat(m[3]))
+      // MediaRecorder webm files often have "Duration: N/A" in the header
+      // (streaming container, no duration written). With -f null - ffmpeg
+      // walks the entire file and prints its final position as time=...
+      // The LAST such match is the true duration.
+      const timeMatches = [...stderr.matchAll(/time=(\d+):(\d+):([\d.]+)/g)]
+      const last = timeMatches[timeMatches.length - 1]
+      if (last) {
+        resolve(
+          parseInt(last[1], 10) * 3600 + parseInt(last[2], 10) * 60 + parseFloat(last[3])
+        )
+        return
+      }
+      reject(new Error(`probe failed: ${stderr.slice(-300)}`))
     })
     p.on('error', reject)
   })
