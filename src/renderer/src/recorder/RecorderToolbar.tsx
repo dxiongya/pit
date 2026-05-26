@@ -173,12 +173,11 @@ export function RecorderToolbar(): React.JSX.Element {
 
       <button
         type="button"
-        className={`rec-tb-toggle${audio ? ' on' : ''}`}
+        className={`rec-tb-toggle icon-only${audio ? ' on' : ''}`}
         onClick={() => setAudio((v) => !v)}
-        title={audio ? 'Microphone on' : 'Microphone off'}
+        title={audio ? 'Microphone on — click to disable' : 'Microphone off — click to enable'}
       >
         {audio ? <MicIcon /> : <MicOffIcon />}
-        <span className="rec-tb-toggle-label">{audio ? 'Microphone' : 'No microphone'}</span>
       </button>
 
       <div className="rec-tb-sep" />

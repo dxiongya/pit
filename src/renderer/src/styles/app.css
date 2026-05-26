@@ -501,6 +501,132 @@ body[data-cols="6"] .masonry { --cols: 6; }
   background: color-mix(in oklab, #ff453a 8%, var(--bg-soft));
 }
 
+/* Lightbox — full-window image viewer with zoom + pan. Mounted via portal-
+ * style sibling of the detail overlay, sits above with its own backdrop. */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.lightbox-img {
+  max-width: 92vw;
+  max-height: 88vh;
+  object-fit: contain;
+  display: block;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+.lightbox-toolbar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(30, 30, 33, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  color: #fff;
+  font-family: var(--f-ui);
+  user-select: none;
+}
+.lightbox-btn {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+.lightbox-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.lightbox-btn.close {
+  background: rgba(255, 69, 58, 0.85);
+  border-color: transparent;
+}
+.lightbox-btn.close:hover {
+  background: #ff584d;
+}
+.lightbox-pct {
+  font-family: var(--f-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.85);
+}
+.lightbox-sep {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 4px;
+}
+.lightbox-hint {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 0.04em;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Expand button overlay — sits in top-right of any detail-stage preview-frame.
+ * Appears on stage hover so it doesn't clutter the static view. */
+.stage-expand {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    background 0.12s ease;
+}
+.detail-stage:hover .stage-expand,
+.stage-expand:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.stage-expand:hover {
+  background: rgba(0, 0, 0, 0.78);
+}
+
 /* Group import — drop zone + thumbnail tray */
 .group-drop {
   margin-top: 14px;

@@ -18,6 +18,7 @@ import { I } from '../../lib/icons'
 import { copyToClipboard, useToast } from '../../components/Toast'
 import { Button } from '../../components/ui'
 import { useStore } from '../../lib/store'
+import { Lightbox } from './Lightbox'
 import {
   PromptTab,
   ThemeAnalysis,
@@ -57,6 +58,7 @@ export function VideoDetail({
   // Distinguish hover-scrub from sticky selection: a hovered frame snaps back
   // to the clicked one when the cursor leaves the strip.
   const [hoverFrame, setHoverFrame] = useState<number | null>(null)
+  const [lightbox, setLightbox] = useState(false)
   const stripRef = useRef<HTMLDivElement>(null)
 
   const doc = item.design
@@ -107,7 +109,17 @@ export function VideoDetail({
 
   return (
     <>
-      <div className="detail-stage">
+      <div className="detail-stage" style={{ position: 'relative' }}>
+        {current?.screenshot && (
+          <button
+            type="button"
+            className="stage-expand"
+            onClick={() => setLightbox(true)}
+            title="Expand current frame (zoom + pan)"
+          >
+            <I.Eye size={14} />
+          </button>
+        )}
         <div className="detail-stage-head">
           <div className="dot-row" style={{ display: 'flex', gap: 5 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff5f57' }} />
@@ -303,6 +315,13 @@ export function VideoDetail({
           {tab === 'components' && <ComponentsAnalysis doc={doc} />}
         </div>
       </div>
+      {lightbox && current?.screenshot && (
+        <Lightbox
+          src={current.screenshot}
+          alt={current.name}
+          onClose={() => setLightbox(false)}
+        />
+      )}
     </>
   )
 }

@@ -7,6 +7,7 @@ import type { DesignDoc, Item } from '../../lib/types'
 import { I } from '../../lib/icons'
 import { copyToClipboard, useToast } from '../../components/Toast'
 import { Button } from '../../components/ui'
+import { Lightbox } from './Lightbox'
 
 type TabId =
   | 'prompt'
@@ -43,6 +44,9 @@ export function LinkDetail({
   const toast = useToast()
   const [tab, setTab] = useState<TabId>('prompt')
   const [currentPage, setCurrentPage] = useState(0)
+  // Lightbox shows the current page's stitched long image (concat of slices)
+  // so the user can zoom + pan to inspect a full-bleed site capture.
+  const [lightbox, setLightbox] = useState<string | null>(null)
   // Reset the stage scroll whenever the detail opens or the user switches page,
   // otherwise React keeps the previous scrollTop and the user lands mid-page
   // (no nav, no hero — looks like the screenshot is "cut off at the top").
@@ -75,9 +79,26 @@ export function LinkDetail({
     toast.push('Style prompt copied')
   }
 
+  // Pick the best image for the lightbox: the first slice of the current
+  // page (sites lay out as a tall stack of slices — the first is enough
+  // for zoom-in inspection; the second slice etc. live in the stacked
+  // stage view already).
+  const lightboxSrc =
+    page?.slices?.[0] || page?.screenshot || item.screenshot || ''
+
   return (
     <>
-      <div className="detail-stage">
+      <div className="detail-stage" style={{ position: 'relative' }}>
+        {lightboxSrc && (
+          <button
+            type="button"
+            className="stage-expand"
+            onClick={() => setLightbox(lightboxSrc)}
+            title="Expand page (zoom + pan)"
+          >
+            <I.Eye size={14} />
+          </button>
+        )}
         <div className="detail-stage-head">
           <div className="dot-row" style={{ display: 'flex', gap: 5 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff5f57' }} />
@@ -225,6 +246,9 @@ export function LinkDetail({
           {tab === 'a11y' && <A11yAnalysis doc={doc} />}
         </div>
       </div>
+      {lightbox && (
+        <Lightbox src={lightbox} alt={page?.name || item.title} onClose={() => setLightbox(null)} />
+      )}
     </>
   )
 }

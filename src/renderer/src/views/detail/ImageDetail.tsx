@@ -12,6 +12,7 @@ import { rankCollections } from '../../lib/ai/provider'
 import { RoutingRow } from '../../components/RoutingRow'
 import { copyToClipboard, useToast } from '../../components/Toast'
 import { Button } from '../../components/ui'
+import { Lightbox } from './Lightbox'
 
 type TabId = 'prompt' | 'analysis' | 'palette' | 'similar'
 
@@ -36,6 +37,7 @@ export function ImageDetail({
   const [tab, setTab] = useState<TabId>('prompt')
   const [copied, setCopied] = useState<'replica' | 'style' | 'hex' | null>(null)
   const [promptSub, setPromptSub] = useState<'style' | 'replica'>('style')
+  const [lightbox, setLightbox] = useState(false)
 
   const design = item.design
   const FALLBACK_ROLES = ['dominant', 'accent', 'shadow', 'deep', 'highlight']
@@ -82,7 +84,19 @@ export function ImageDetail({
 
   return (
     <>
-      <div className="detail-stage">
+      <div className="detail-stage" style={{ position: 'relative' }}>
+        {/* Show the expand affordance whenever there's something visual to
+            zoom — screenshot OR an HTML iframe to preview. */}
+        {(item.screenshot || item.html) && (
+          <button
+            type="button"
+            className="stage-expand"
+            onClick={() => setLightbox(true)}
+            title="Expand (zoom + pan)"
+          >
+            <I.Eye size={14} />
+          </button>
+        )}
         <div className="detail-stage-head">
           <div className="dot-row" style={{ display: 'flex', gap: 5 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff5f57' }} />
@@ -505,6 +519,9 @@ export function ImageDetail({
             })()}
         </div>
       </div>
+      {lightbox && item.screenshot && (
+        <Lightbox src={item.screenshot} alt={item.title} onClose={() => setLightbox(false)} />
+      )}
     </>
   )
 }

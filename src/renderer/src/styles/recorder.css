@@ -122,6 +122,14 @@
 .rec-tb-toggle.on {
   color: #fff;
 }
+.rec-tb-toggle.icon-only {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+.rec-tb-toggle.icon-only.on {
+  background: rgba(255, 255, 255, 0.1);
+}
 .rec-tb-spacer {
   flex: 1;
   min-width: 12px;
@@ -189,6 +197,8 @@
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
   transition:
     background 0.12s ease,
     transform 0.08s ease;
