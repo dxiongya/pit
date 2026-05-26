@@ -135,6 +135,8 @@ const pit = {
     }): void => ipcRenderer.send('pit:rec:begin', opts),
     // Toolbar cancel without recording.
     cancelToolbar: (): void => ipcRenderer.send('pit:rec:cancel-toolbar'),
+    // Toolbar window grows/shrinks vertically when the window-picker opens.
+    toolbarResize: (h: number): void => ipcRenderer.send('pit:rec:toolbar-resize', h),
     // Subscribe (main pit window) to the begin signal.
     onBegin: (
       cb: (opts: {

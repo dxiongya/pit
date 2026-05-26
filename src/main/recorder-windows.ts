@@ -103,6 +103,26 @@ export function closeToolbar(): void {
   toolbarWin = null
 }
 
+/**
+ * Resize the toolbar window vertically — used when the window-picker popover
+ * opens (needs ~400px of room above the toolbar). Anchored at the bottom of
+ * the primary display so the pill stays visually pinned to the bottom while
+ * the popover area grows upward.
+ */
+export function resizeToolbar(h: number): void {
+  if (!toolbarWin || toolbarWin.isDestroyed()) return
+  const primary = screen.getPrimaryDisplay()
+  const w = 720
+  const bottomMargin = 28
+  const newY = primary.workArea.y + primary.workArea.height - h - bottomMargin
+  toolbarWin.setBounds({
+    x: Math.round(primary.workArea.x + (primary.workArea.width - w) / 2),
+    y: Math.round(newY),
+    width: w,
+    height: h
+  })
+}
+
 interface StartOpts {
   mode: 'screen' | 'window' | 'region'
   /** When mode is 'screen' or 'region', the display whose bounds we should

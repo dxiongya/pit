@@ -2,13 +2,19 @@
  * Each style block is scoped to its #/recorder-* route's root element.
  */
 
-/* Bottom picker toolbar — the entry UI shown after the user clicks Record
- * in pit. Replaces the in-app modal. Pill shape, dark glass, draggable. */
+/* Bottom picker toolbar — anchored at the bottom of the BrowserWindow so the
+ * window can grow upward (popover) without the pill stretching. The empty
+ * area above is transparent (body.recorder-mode); the popover renders into
+ * that space when window-picker opens. */
 .rec-toolbar {
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 100vh;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 84px;
   padding: 0 6px 0 8px;
   background: rgba(30, 30, 33, 0.94);
   backdrop-filter: saturate(180%) blur(20px);
@@ -23,7 +29,6 @@
   user-select: none;
   -webkit-user-select: none;
   -webkit-app-region: drag;
-  position: relative;
 }
 .rec-tb-close,
 .rec-tb-mode,

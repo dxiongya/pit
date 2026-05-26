@@ -60,6 +60,13 @@ export function RecorderToolbar(): React.JSX.Element {
     return () => document.removeEventListener('mousedown', onDown)
   }, [popoverOpen])
 
+  // The toolbar window is normally pill-height (~84px). When the popover
+  // opens we expand the window so the popover (which renders above the bar)
+  // isn't clipped by the BrowserWindow bounds. Shrink back on close.
+  useEffect(() => {
+    window.pit.rec.toolbarResize(popoverOpen ? 520 : 84)
+  }, [popoverOpen])
+
   // Keyboard: Esc cancels everything
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {

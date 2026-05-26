@@ -40,6 +40,7 @@ import {
   pushFloatState,
   openToolbar,
   closeToolbar,
+  resizeToolbar,
   findMainWindow
 } from './recorder-windows'
 
@@ -202,6 +203,9 @@ function registerIpc(): void {
   )
   // Toolbar cancel — closes toolbar; restore happens in toolbar 'closed' hook.
   ipcMain.on('pit:rec:cancel-toolbar', () => closeToolbar())
+  // Toolbar grows vertically when the window-picker popover opens, shrinks
+  // back to the pill height when it closes.
+  ipcMain.on('pit:rec:toolbar-resize', (_e, h: number) => resizeToolbar(h))
 
   ipcMain.handle(
     'pit:rec:start-chrome',
