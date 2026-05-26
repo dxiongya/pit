@@ -105,7 +105,7 @@ async function sleep(ms: number): Promise<void> {
 }
 
 /** One chat completion with up to 3 attempts (exponential backoff: 0.5s, 1s). */
-async function callModel(
+export async function callModel(
   req: RoleRequest,
   system: string,
   user: string,

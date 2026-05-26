@@ -64,6 +64,35 @@ export interface Item {
   /** Pages already captured during a live link import — drives the per-page
    *  thumbnails in AnalyzingDetail. Mirrored into design.pages on finalize. */
   capturedPages?: CapturedPage[]
+  /** AI-generated HTML variants of this item's design (color variations +
+   *  custom content rewrites). Stored nested so derivatives don't flood the
+   *  main masonry; surfaced in the Derive tab of the detail overlay. */
+  derivatives?: Derivative[]
+  error?: string
+}
+
+/* ============================================================
+   Derivatives — Phase 5: design-system-driven HTML codegen.
+   ============================================================ */
+
+export interface Derivative {
+  id: string
+  /** What kind of variation this is — color shift vs content rewrite. */
+  kind: 'color' | 'content'
+  /** Short human label (e.g. "Cool mist", "Pricing page reframe"). */
+  label: string
+  /** For multi-page items (link kind), which page this derivative is based on. */
+  parentPageName?: string
+  /** Single-file HTML (inline CSS) the model produced. */
+  html: string
+  /** Rendered preview screenshot (data: URL) — used as the card thumbnail. */
+  screenshot?: string
+  /** Palette override applied (color variations only). */
+  palette?: PaletteRole[]
+  /** User-supplied prompt that drove the rewrite (content variations only). */
+  contentPrompt?: string
+  createdAt: number
+  /** Set if generation or capture failed — UI shows a retry. */
   error?: string
 }
 
@@ -257,9 +286,12 @@ export interface Provider {
  *  - `design`  — image-input: screenshots → DESIGN.md (tasks A & B, also drives
  *                video keyframe analysis — videos are pre-extracted to images
  *                client-side, so any vision model works universally)
+ *  - `derive`  — generates HTML derivatives (color variations + content rewrites)
+ *                from an analyzed item's design system. Benefits from a strong
+ *                code-aware text model (Claude / GPT family).
  *  - `routing` — text-only: classify an item into a collection (task C)
  */
-export type AIRole = 'design' | 'routing'
+export type AIRole = 'design' | 'derive' | 'routing'
 
 /** Which provider instance + model serves a given role. */
 export interface RoleBinding {

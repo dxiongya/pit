@@ -1,6 +1,6 @@
 // DetailOverlay.tsx — modal wrapper choosing the right detail panel for an item.
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { Item } from '../../lib/types'
 import { I } from '../../lib/icons'
 import { useStore } from '../../lib/store'
@@ -10,6 +10,7 @@ import { ImageDetail } from './ImageDetail'
 import { VideoDetail } from './VideoDetail'
 import { AnalyzingDetail } from './AnalyzingDetail'
 import { MoveToButton } from './MoveTo'
+import { DeriveModal } from './DeriveModal'
 
 export function DetailOverlay({
   item,
@@ -22,17 +23,24 @@ export function DetailOverlay({
 }): React.JSX.Element {
   const { removeItem } = useStore()
   const toast = useToast()
+  const [deriveOpen, setDeriveOpen] = useState(false)
 
-  // Esc closes the overlay.
+  // Esc closes the overlay (but not when DeriveModal is up — it has its own).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape' && !deriveOpen) onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, deriveOpen])
 
   const analyzing = item.status === 'analyzing'
+  // Only show Derive once analysis has produced at least one replica prompt.
+  const canDerive =
+    !analyzing &&
+    !!item.design &&
+    (!!item.design.replicaPrompt ||
+      (item.design.pages || []).some((p) => p.replicaPrompt && p.replicaPrompt.trim()))
 
   const handleDelete = (): void => {
     if (analyzing) {
@@ -55,6 +63,15 @@ export function DetailOverlay({
       <div className="detail-card" onClick={(e) => e.stopPropagation()}>
         <div className="detail-actions">
           {!analyzing && <MoveToButton item={item} />}
+          {canDerive && (
+            <button
+              className="detail-action"
+              onClick={() => setDeriveOpen(true)}
+              title="Generate HTML derivatives (color + content variations)"
+            >
+              <I.Wand size={14} />
+            </button>
+          )}
           <button
             className="detail-action danger"
             onClick={handleDelete}
@@ -76,6 +93,7 @@ export function DetailOverlay({
           <ImageDetail item={item} onShare={onShare} />
         )}
       </div>
+      {deriveOpen && <DeriveModal item={item} onClose={() => setDeriveOpen(false)} />}
     </div>
   )
 }

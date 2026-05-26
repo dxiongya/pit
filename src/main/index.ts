@@ -33,6 +33,12 @@ import {
 } from './share'
 import { extractKeyframes, type ExtractResult } from './video'
 import {
+  buildPaletteVariations,
+  namePaletteVariations,
+  deriveOne,
+  type DerivedOne
+} from './derive'
+import {
   startRecorderChrome,
   stopRecorderChrome,
   pickRegion,
@@ -139,6 +145,44 @@ function registerIpc(): void {
 
   // pit.ink share — POST to the share API, returns { code, url, hasPassword, expiresAt }.
   ipcMain.handle('pit:share:create', (_e, input: ShareCreateInput) => createShare(input))
+
+  // Derive — palette code-shift + AI naming. Pure code for the colors,
+  // single AI call for the labels. Returns labelled variations the renderer
+  // then turns into codegen jobs.
+  ipcMain.handle(
+    'pit:derive:propose-palettes',
+    async (
+      _e,
+      input: {
+        req: RoleRequest
+        palette: { hex: string; role?: string; pct?: number }[]
+        count?: number
+      }
+    ) => {
+      const variations = buildPaletteVariations(input.palette, input.count ?? 3)
+      return namePaletteVariations(input.req, variations)
+    }
+  )
+  // Single derivative generation + capture (color or content). Renderer
+  // calls this once per variant so it can stream cards into the grid as
+  // they complete.
+  ipcMain.handle(
+    'pit:derive:run',
+    (
+      _e,
+      input: {
+        req: RoleRequest
+        replicaPrompt: string
+        designTokens?: {
+          theme?: string
+          fonts?: { name?: string; weight?: string; size?: string; role?: string }[]
+          layoutNote?: string
+        }
+        palette?: { hex: string; role?: string; pct?: number }[]
+        contentPrompt?: string
+      }
+    ): Promise<DerivedOne> => deriveOne(input)
+  )
 
   // Inbound deep-link helpers — called by the renderer's ReceiveShareModal.
   ipcMain.handle('pit:share:fetch', (_e, code: string) => fetchShare(code))

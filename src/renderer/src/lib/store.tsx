@@ -142,6 +142,12 @@ function mergeSettings(partial: Partial<AppSettings>): AppSettings {
         // Migration: the standalone `video` role was removed — video frames
         // are now analyzed by the `design` role (same modality, same model).
         // Any persisted roles.video is silently dropped on load.
+        // `derive` is new — older settings won't have it; default to design's
+        // provider so the codegen tab works out of the box if design is set.
+        derive:
+          migrate(pai?.roles?.derive) ||
+          migrate(pai?.roles?.design) ||
+          DEFAULT_AI_SETTINGS.roles.derive,
         routing: migrate(pai?.roles?.routing) || DEFAULT_AI_SETTINGS.roles.routing
       },
       features: {

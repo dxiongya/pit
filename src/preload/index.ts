@@ -59,6 +59,27 @@ const pit = {
   // by webContents.startDrag.
   dragImages: (dataUrls: string[], name?: string): void =>
     ipcRenderer.send('pit:drag-images', { dataUrls, name }),
+  // Derive — generate HTML variants from an analyzed item's design.
+  derive: {
+    proposePalettes: (input: {
+      req: RoleRequest
+      palette: { hex: string; role?: string; pct?: number }[]
+      count?: number
+    }): Promise<{ label: string; palette: { hex: string; role?: string; pct?: number }[] }[]> =>
+      ipcRenderer.invoke('pit:derive:propose-palettes', input),
+    run: (input: {
+      req: RoleRequest
+      replicaPrompt: string
+      designTokens?: {
+        theme?: string
+        fonts?: { name?: string; weight?: string; size?: string; role?: string }[]
+        layoutNote?: string
+      }
+      palette?: { hex: string; role?: string; pct?: number }[]
+      contentPrompt?: string
+    }): Promise<{ html: string; screenshot?: string; error?: string }> =>
+      ipcRenderer.invoke('pit:derive:run', input)
+  },
   // pit.ink share — uploads blobs to R2 + writes manifest to D1, returns share URL.
   share: {
     create: (input: {

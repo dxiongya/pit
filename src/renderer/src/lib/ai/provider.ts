@@ -74,6 +74,10 @@ export const ROLE_META: Record<AIRole, { name: string; desc: string; needsInput?
     desc: 'Reads page/image/video-keyframe screenshots → DESIGN.md (palette, type, components, layout, motion, a11y). Needs an image-input model — videos are pre-extracted to keyframes locally, so any vision model works.',
     needsInput: 'image'
   },
+  derive: {
+    name: 'Derive · codegen',
+    desc: 'Generates HTML derivatives — same design system, different palette or different content — from an analyzed item. Benefits from a strong code-aware text model (Claude / GPT family).'
+  },
   routing: {
     name: 'Routing · auto-classify',
     desc: 'Sorts each new item into the best-matching collection, based on its summary/tags and each collection’s prompt. A small, fast text model is ideal.'
@@ -111,6 +115,7 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   ],
   roles: {
     design: { providerId: 'anthropic', model: 'claude-opus-4-7' },
+    derive: { providerId: 'anthropic', model: 'claude-opus-4-7' },
     routing: { providerId: 'anthropic', model: 'claude-haiku-4-5' }
   },
   features: {
@@ -621,6 +626,81 @@ export async function analyzeVideoFrames(
       error: e instanceof Error ? e.message : 'Analysis failed'
     }
   }
+}
+
+/**
+ * Derive HTML variants — resolves the `derive` role (falls back to `design`
+ * since they share the same model class) and calls into the main process
+ * through window.pit.derive.{proposePalettes,run}. UI components stay
+ * provider-agnostic.
+ */
+function deriveReq(settings: AISettings): RoleRequest | null {
+  let { provider, model } = resolveRole(settings, 'derive')
+  if (!provider || !isProviderConfigured(provider)) {
+    const d = resolveRole(settings, 'design')
+    provider = d.provider
+    model = d.model
+  }
+  if (!provider || !isProviderConfigured(provider)) return null
+  return providerRequest(provider, model)
+}
+
+export async function proposePalettes(
+  palette: { hex: string; role?: string; pct?: number }[],
+  count: number,
+  settings: AISettings
+): Promise<{ label: string; palette: { hex: string; role?: string; pct?: number }[] }[]> {
+  const b = bridge() as PitBridge & {
+    derive?: {
+      proposePalettes: (
+        input: {
+          req: RoleRequest
+          palette: { hex: string; role?: string; pct?: number }[]
+          count?: number
+        }
+      ) => Promise<{ label: string; palette: { hex: string; role?: string; pct?: number }[] }[]>
+    }
+  }
+  const req = deriveReq(settings)
+  if (!b?.derive || !req) return []
+  return b.derive.proposePalettes({ req, palette, count })
+}
+
+export async function runDerive(
+  input: {
+    replicaPrompt: string
+    designTokens?: {
+      theme?: string
+      fonts?: { name?: string; weight?: string; size?: string; role?: string }[]
+      layoutNote?: string
+    }
+    palette?: { hex: string; role?: string; pct?: number }[]
+    contentPrompt?: string
+  },
+  settings: AISettings
+): Promise<{ html: string; screenshot?: string; error?: string }> {
+  const b = bridge() as PitBridge & {
+    derive?: {
+      run: (
+        input: {
+          req: RoleRequest
+          replicaPrompt: string
+          designTokens?: {
+            theme?: string
+            fonts?: { name?: string; weight?: string; size?: string; role?: string }[]
+            layoutNote?: string
+          }
+          palette?: { hex: string; role?: string; pct?: number }[]
+          contentPrompt?: string
+        }
+      ) => Promise<{ html: string; screenshot?: string; error?: string }>
+    }
+  }
+  const req = deriveReq(settings)
+  if (!b?.derive || !req) {
+    return { html: '', error: 'No derive/design model configured — add one in Settings.' }
+  }
+  return b.derive.run({ req, ...input })
 }
 
 /** Verify a concrete provider request (per provider, or per model in the editor). */
