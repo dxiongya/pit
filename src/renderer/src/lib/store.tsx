@@ -197,6 +197,10 @@ interface StoreValue {
     originalName?: string,
     cropRect?: { x: number; y: number; w: number; h: number }
   ) => void
+  /** Re-run AI analysis on an existing video item using its already-extracted
+   *  keyframes. Useful when the first analyze pass failed (e.g. provider
+   *  quota / geo block) and the user switched models in Settings. */
+  reanalyzeVideo: (itemId: string) => void
 }
 
 interface PersistBridge {
@@ -605,6 +609,62 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
     [settings.ai, collections, addItem, updateItem, moveItem]
   )
 
+  // Re-run analysis on an existing video item (frames already in DB) — the
+  // user typically lands here after the first attempt failed (provider quota
+  // / geo block) and they fixed it via Settings + want to retry without
+  // re-recording the source.
+  const reanalyzeVideo = useCallback(
+    (itemId: string) => {
+      const it = items.find((x) => x.id === itemId)
+      if (!it || it.kind !== 'video') return
+      const frames = (it.design?.pages || [])
+        .map((p) => p.screenshot)
+        .filter((f): f is string => typeof f === 'string' && f.length > 0)
+      if (!frames.length) return
+      updateItem(itemId, {
+        status: 'analyzing',
+        progress: 'Re-analyzing…',
+        streamText: '',
+        error: undefined
+      })
+      let stream = ''
+      void (async () => {
+        try {
+          const title = it.title || 'Video'
+          const { doc, motionDescriptions, source, error } = await analyzeVideoFrames(
+            frames,
+            title,
+            settings.ai,
+            (c) => {
+              stream += c
+              updateItem(itemId, { streamText: stream })
+            }
+          )
+          const pages = (it.design?.pages || []).map((p, i) => ({
+            ...p,
+            motionDescription: motionDescriptions?.[i]
+          }))
+          updateItem(itemId, {
+            status: 'ready',
+            design: { ...doc, pages },
+            title: doc.title || title,
+            tags: doc.tags,
+            prompt: doc.stylePrompt || doc.agentPrompt,
+            palette: doc.palette?.map((p) => p.hex),
+            progress: undefined,
+            error: source === 'mock' ? error : undefined
+          })
+        } catch (e) {
+          updateItem(itemId, {
+            status: 'failed',
+            error: e instanceof Error ? e.message : 're-analysis failed'
+          })
+        }
+      })()
+    },
+    [items, settings.ai, updateItem]
+  )
+
   const value = useMemo<StoreValue>(
     () => ({
       settings,
@@ -621,7 +681,8 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
       moveItem,
       importLink,
       importImage,
-      importVideo
+      importVideo,
+      reanalyzeVideo
     }),
     [
       settings,
@@ -638,7 +699,8 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
       moveItem,
       importLink,
       importImage,
-      importVideo
+      importVideo,
+      reanalyzeVideo
     ]
   )
 

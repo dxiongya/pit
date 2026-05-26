@@ -17,6 +17,7 @@ import type { DesignDoc, Item } from '../../lib/types'
 import { I } from '../../lib/icons'
 import { copyToClipboard, useToast } from '../../components/Toast'
 import { Button } from '../../components/ui'
+import { useStore } from '../../lib/store'
 import {
   PromptTab,
   ThemeAnalysis,
@@ -49,6 +50,7 @@ export function VideoDetail({
   onShare: () => void
 }): React.JSX.Element {
   const toast = useToast()
+  const { reanalyzeVideo } = useStore()
   const [tab, setTab] = useState<TabId>('prompt')
   const [frame, setFrame] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -256,8 +258,19 @@ export function VideoDetail({
             }}
             title={item.error}
           >
-            <strong style={{ color: '#ff453a' }}>Analysis failed.</strong>{' '}
-            {parseHumanError(item.error)}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <strong style={{ color: '#ff453a' }}>Analysis failed.</strong>{' '}
+                {parseHumanError(item.error)}
+              </div>
+              <Button
+                size="sm"
+                onClick={() => reanalyzeVideo(item.id)}
+                title="Re-run analysis on the existing keyframes"
+              >
+                <I.Sparkles size={12} /> Retry
+              </Button>
+            </div>
           </div>
         )}
 

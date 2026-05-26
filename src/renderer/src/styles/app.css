@@ -441,6 +441,133 @@ body[data-cols="6"] .masonry { --cols: 6; }
   background-position: center;
 }
 
+/* Share modal — cover glyph centered over the gradient avatar */
+.share-preview .ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.share-preview-glyph {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.92);
+  letter-spacing: -0.02em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  line-height: 1;
+}
+
+/* Share modal — generic row with label + helper text on the left and a
+ * trailing control (Switch / button / chip) pinned to the right. Replaces
+ * Field.labelExtra for cases where the trailing element was overflowing. */
+.share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.share-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.share-row-hint {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Share history — list of previously-created shares for quick copy / forget */
+.share-history {
+  border-top: 1px solid var(--hair);
+  padding-top: 14px;
+  margin-top: 4px;
+}
+.share-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.share-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-soft);
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: border-color 0.12s ease;
+}
+.share-history-row:hover {
+  border-color: var(--hair);
+}
+.share-history-cover {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex: 0 0 28px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+.share-history-meta {
+  flex: 1;
+  min-width: 0;
+}
+.share-history-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-history-lock {
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.75;
+}
+.share-history-sub {
+  font-size: 11px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-history-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--hair);
+  color: var(--ink-2);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: var(--f-ui);
+  border-radius: 5px;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.share-history-btn:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+.share-history-btn.dim {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-3);
+  padding: 4px 6px;
+  font-size: 14px;
+  line-height: 1;
+}
+.share-history-btn.dim:hover {
+  color: var(--ink);
+  background: var(--bg-hover);
+}
+
 /* RecordModal picker — mode tabs (Screen / Window / Region) + audio toggle.
  * Lives in the share-modal shell so spacing matches the rest of the modal. */
 .rec-mode-tabs {

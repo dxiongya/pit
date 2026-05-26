@@ -4,8 +4,16 @@
 import { useEffect, useState } from 'react'
 import type { Collection, Item } from '../../lib/types'
 import { I } from '../../lib/icons'
-import { copyToClipboard } from '../../components/Toast'
+import { copyToClipboard, useToast } from '../../components/Toast'
 import { Button, Field, Input, Select, Switch } from '../../components/ui'
+import {
+  gradientFromId,
+  listShares,
+  pushShare,
+  relativeAge,
+  removeShare,
+  type ShareRecord
+} from '../../lib/shareHistory'
 
 export type ShareTarget =
   | { kind: 'item'; item: Item }
@@ -37,6 +45,7 @@ export function ShareModal({
   target: ShareTarget
   onClose: () => void
 }): React.JSX.Element {
+  const toast = useToast()
   const [usePassword, setUsePassword] = useState(false)
   const [password, setPassword] = useState('')
   const [ttl, setTtl] = useState<Ttl>('never')
@@ -44,6 +53,13 @@ export function ShareModal({
   const [err, setErr] = useState('')
   const [result, setResult] = useState<{ url: string; code: string } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [history, setHistory] = useState<ShareRecord[]>(() => listShares())
+
+  // Stable gradient cover seeded by the target's id — same collection / item
+  // always shows the same colors so the avatar is recognizable.
+  const seedId =
+    target.kind === 'collection' ? target.collection.id : target.item.id
+  const coverGradient = gradientFromId(seedId)
 
   // Esc closes when we're not mid-upload, so the user doesn't accidentally
   // bail in the middle of an R2 write.
@@ -80,6 +96,19 @@ export function ShareModal({
       const res = await window.pit.share.create(input)
       setResult({ url: res.url, code: res.code })
       setPhase('done')
+      // Persist locally so the modal's history list can show it next time.
+      pushShare({
+        code: res.code,
+        url: res.url,
+        createdAt: Date.now(),
+        targetKind: target.kind,
+        targetName:
+          target.kind === 'collection' ? target.collection.name : target.item.title || 'item',
+        itemCount: target.kind === 'collection' ? target.items.length : 1,
+        hasPassword: res.hasPassword,
+        expiresAt: res.expiresAt
+      })
+      setHistory(listShares())
       // Auto-copy on success — the moment people want this URL is right now.
       await copyToClipboard(res.url)
       setCopied(true)
@@ -88,6 +117,15 @@ export function ShareModal({
       setErr((e as Error).message || 'Failed to create share')
       setPhase('error')
     }
+  }
+
+  const copyHistoryUrl = async (url: string): Promise<void> => {
+    await copyToClipboard(url)
+    toast.push('Link copied')
+  }
+  const forgetHistory = (code: string): void => {
+    removeShare(code)
+    setHistory(listShares())
   }
 
   const handleCopy = async (): Promise<void> => {
@@ -110,15 +148,11 @@ export function ShareModal({
         </div>
 
         <div className="share-preview">
-          <div
-            className="ph"
-            style={{
-              background:
-                target.kind === 'collection'
-                  ? target.collection.color || 'linear-gradient(160deg, #e89b6a, #6e2418)'
-                  : 'linear-gradient(160deg, #4356a0, #1b1f3b)'
-            }}
-          />
+          <div className="ph" style={{ background: coverGradient }}>
+            <span className="share-preview-glyph">
+              {(title || '?').trim().charAt(0).toUpperCase() || '·'}
+            </span>
+          </div>
           <div>
             <div style={{ fontWeight: 600 }}>{title}</div>
             <div className="muted" style={{ fontSize: 12 }}>
@@ -129,27 +163,85 @@ export function ShareModal({
 
         {phase === 'idle' && (
           <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <Field
-              label="Password protect"
-              labelExtra={<Switch on={usePassword} onChange={() => setUsePassword(!usePassword)} />}
-            >
-              {usePassword ? (
-                <Input
-                  type="password"
-                  placeholder="Set a password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              ) : (
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Anyone with the link can open it without a password.
+            {/* Password row — switch sits to the right of the row, inside the
+                modal. Custom flex layout instead of Field.labelExtra (whose
+                positioning was pushing the switch outside the modal). */}
+            <div className="share-row">
+              <div className="share-row-text">
+                <div className="ui-label">Password protect</div>
+                <div className="muted share-row-hint">
+                  {usePassword
+                    ? 'Recipients will need this password to open.'
+                    : 'Anyone with the link can open it without a password.'}
                 </div>
-              )}
-            </Field>
+              </div>
+              <Switch on={usePassword} onChange={() => setUsePassword(!usePassword)} />
+            </div>
+            {usePassword && (
+              <Input
+                type="password"
+                placeholder="Set a password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            )}
 
             <Field label="Expires">
               <Select value={ttl} onValueChange={(v) => setTtl(v)} items={TTL_ITEMS} />
             </Field>
+
+            {history.length > 0 && (
+              <div className="share-history">
+                <div className="ui-label" style={{ marginBottom: 6 }}>
+                  Recent shares
+                  <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
+                    · {history.length} total
+                  </span>
+                </div>
+                <div className="share-history-list">
+                  {history.slice(0, 5).map((r) => (
+                    <div key={r.code} className="share-history-row">
+                      <div
+                        className="share-history-cover"
+                        style={{ background: gradientFromId(r.code) }}
+                        aria-hidden
+                      />
+                      <div className="share-history-meta">
+                        <div className="share-history-name" title={r.targetName}>
+                          {r.targetName}
+                          {r.hasPassword && (
+                            <span className="share-history-lock" title="Password protected">
+                              🔒
+                            </span>
+                          )}
+                        </div>
+                        <div className="muted share-history-sub">
+                          {r.itemCount} {r.itemCount === 1 ? 'item' : 'items'} ·{' '}
+                          {relativeAge(r.createdAt)}
+                          {r.expiresAt && ` · expires ${relativeAge(r.expiresAt * 1000)}`}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="share-history-btn"
+                        onClick={() => void copyHistoryUrl(r.url)}
+                        title={r.url}
+                      >
+                        <I.Copy size={11} /> Copy
+                      </button>
+                      <button
+                        type="button"
+                        className="share-history-btn dim"
+                        onClick={() => forgetHistory(r.code)}
+                        title="Remove from local history (the link remains live on pit.ink until TTL)"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
               <Button size="sm" onClick={onClose}>
