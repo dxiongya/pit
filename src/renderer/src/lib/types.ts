@@ -92,6 +92,9 @@ export interface Derivative {
   /** User-supplied prompt that drove the rewrite (content variations only). */
   contentPrompt?: string
   createdAt: number
+  /** True while the codegen call is in flight — UI renders a shimmer card.
+   *  Cleared (or omitted) once html lands. */
+  pending?: boolean
   /** Set if generation or capture failed — UI shows a retry. */
   error?: string
 }

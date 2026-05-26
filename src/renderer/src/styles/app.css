@@ -500,6 +500,84 @@ body[data-cols="6"] .masonry { --cols: 6; }
   color: #ff453a;
   background: color-mix(in oklab, #ff453a 8%, var(--bg-soft));
 }
+
+/* Pending state — shimmer band sweeps across the thumb, the kind-icon spins
+ * in the middle, and the label gets an animated 3-dot trail. Tells the user
+ * "this card is alive, we're working on it" without blocking the modal. */
+.derive-card.pending {
+  cursor: default;
+}
+.derive-card-thumb.skeleton {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    110deg,
+    var(--bg-soft) 8%,
+    var(--bg-hover) 18%,
+    var(--bg-soft) 33%
+  );
+  background-size: 220% 100%;
+  animation: derive-shimmer 1.4s linear infinite;
+  overflow: hidden;
+}
+@keyframes derive-shimmer {
+  0% {
+    background-position: 220% 0;
+  }
+  100% {
+    background-position: -220% 0;
+  }
+}
+.derive-card-shimmer {
+  display: none;
+}
+.derive-card-spinner {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  animation: derive-spin 1.8s linear infinite;
+}
+@keyframes derive-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.derive-pending-dots {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.derive-pending-dots span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  animation: derive-dot 1.3s ease-in-out infinite;
+}
+.derive-pending-dots span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.derive-pending-dots span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+@keyframes derive-dot {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
 .derive-card-meta {
   display: flex;
   flex-direction: column;
