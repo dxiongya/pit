@@ -190,16 +190,6 @@ interface StoreValue {
   removeCollection: (id: string) => void
   addItem: (item: Item) => void
   updateItem: (id: string, patch: Partial<Item>) => void
-  /** Race-safe derivatives append — uses functional setState so concurrent
-   *  jobs (parallel codegen) don't clobber each other. */
-  addDerivatives: (itemId: string, added: import('./types').Derivative[]) => void
-  /** Race-safe per-derivative patch — finds derivative by id inside the item
-   *  and merges the patch. Used as each codegen / capture completes. */
-  updateDerivative: (
-    itemId: string,
-    derivativeId: string,
-    patch: Partial<import('./types').Derivative>
-  ) => void
   removeItem: (id: string) => void
   moveItem: (itemId: string, collectionId: string) => void
   /** Paste-to-import: add a pending card, then capture/analyze in the background. */
@@ -332,45 +322,6 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
       return next
     })
   }, [])
-  const addDerivatives = useCallback(
-    (itemId: string, added: import('./types').Derivative[]) => {
-      setItems((it) => {
-        const next = it.map((i) =>
-          i.id === itemId
-            ? { ...i, derivatives: [...(i.derivatives || []), ...added] }
-            : i
-        )
-        const merged = next.find((i) => i.id === itemId)
-        if (merged) void persistBridge()?.items?.upsert(merged)
-        return next
-      })
-    },
-    []
-  )
-  const updateDerivative = useCallback(
-    (
-      itemId: string,
-      derivativeId: string,
-      patch: Partial<import('./types').Derivative>
-    ) => {
-      setItems((it) => {
-        const next = it.map((i) =>
-          i.id === itemId
-            ? {
-                ...i,
-                derivatives: (i.derivatives || []).map((d) =>
-                  d.id === derivativeId ? { ...d, ...patch } : d
-                )
-              }
-            : i
-        )
-        const merged = next.find((i) => i.id === itemId)
-        if (merged) void persistBridge()?.items?.upsert(merged)
-        return next
-      })
-    },
-    []
-  )
   const removeItem = useCallback((id: string) => {
     setItems((it) => it.filter((i) => i.id !== id))
     void persistBridge()?.items?.delete(id)
@@ -732,8 +683,6 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
       removeCollection,
       addItem,
       updateItem,
-      addDerivatives,
-      updateDerivative,
       removeItem,
       moveItem,
       importLink,
@@ -752,8 +701,6 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
       removeCollection,
       addItem,
       updateItem,
-      addDerivatives,
-      updateDerivative,
       removeItem,
       moveItem,
       importLink,

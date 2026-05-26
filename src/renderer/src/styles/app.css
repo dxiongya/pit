@@ -501,6 +501,60 @@ body[data-cols="6"] .masonry { --cols: 6; }
   background: color-mix(in oklab, #ff453a 8%, var(--bg-soft));
 }
 
+/* Derive job-progress list — one row per in-flight derivative job, shown
+ * in the modal while cards are streaming into the masonry behind. */
+.derive-job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.derive-job-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.derive-job-row.done {
+  border-color: color-mix(in oklab, var(--accent) 32%, var(--hair));
+  background: color-mix(in oklab, var(--accent) 5%, var(--bg-card));
+}
+.derive-job-row.error {
+  border-color: color-mix(in oklab, #ff453a 32%, var(--hair));
+  background: color-mix(in oklab, #ff453a 5%, var(--bg-card));
+}
+.derive-job-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex: 0 0 18px;
+  color: var(--ink-3);
+}
+.derive-job-row.pending .derive-job-icon {
+  animation: derive-spin 1.2s linear infinite;
+  color: var(--accent);
+}
+.derive-job-row.done .derive-job-icon {
+  color: var(--accent);
+  font-weight: 700;
+}
+.derive-job-row.error .derive-job-icon {
+  color: #ff453a;
+}
+.derive-job-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Pending state — shimmer band sweeps across the thumb, the kind-icon spins
  * in the middle, and the label gets an animated 3-dot trail. Tells the user
  * "this card is alive, we're working on it" without blocking the modal. */

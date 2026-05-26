@@ -96,7 +96,28 @@ export function ImageDetail({
         </div>
         <div className="detail-stage-body">
           {item.kind === 'image' &&
-            (item.screenshot ? (
+            // Derived items carry the full HTML body — render it live in an
+            // iframe so the user sees the actual page, not just the static
+            // capture (interactive hover states, scrollable long layouts, …).
+            (item.html ? (
+              <div
+                className="preview-frame"
+                style={{
+                  width: '92%',
+                  height: '100%',
+                  background: '#fff',
+                  borderRadius: 6,
+                  overflow: 'hidden'
+                }}
+              >
+                <iframe
+                  srcDoc={item.html}
+                  sandbox="allow-same-origin"
+                  title={item.title}
+                  style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+                />
+              </div>
+            ) : item.screenshot ? (
               <div className="preview-frame" style={{ maxWidth: '85%' }}>
                 <img
                   src={item.screenshot}
@@ -202,13 +223,38 @@ export function ImageDetail({
           </div>
           {/* Move + Delete + Close are in the overlay actions row (top-right).
               We only keep item-specific shortcuts here. */}
-          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
             <Button size="sm" onClick={copyPalette} disabled={!palette.length}>
               <I.Copy size={13} /> Copy palette
             </Button>
             <Button size="sm" onClick={onShare}>
               <I.Share size={13} /> Share
             </Button>
+            {/* Derived-item shortcuts — only shown when item.html exists. */}
+            {item.html && (
+              <>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    void copyToClipboard(item.html || '')
+                    toast.push('HTML copied')
+                  }}
+                >
+                  <I.Copy size={13} /> Copy HTML
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const blob = new Blob([item.html || ''], { type: 'text/html' })
+                    const url = URL.createObjectURL(blob)
+                    window.open(url, '_blank')
+                    setTimeout(() => URL.revokeObjectURL(url), 30000)
+                  }}
+                >
+                  <I.Globe size={13} /> Open externally
+                </Button>
+              </>
+            )}
           </div>
         </div>
 

@@ -64,38 +64,34 @@ export interface Item {
   /** Pages already captured during a live link import — drives the per-page
    *  thumbnails in AnalyzingDetail. Mirrored into design.pages on finalize. */
   capturedPages?: CapturedPage[]
-  /** AI-generated HTML variants of this item's design (color variations +
-   *  custom content rewrites). Stored nested so derivatives don't flood the
-   *  main masonry; surfaced in the Derive tab of the detail overlay. */
-  derivatives?: Derivative[]
+  /** Single-file HTML body — set on items produced by the Derive flow.
+   *  Image cards with this field show a "Preview HTML" tab in detail. */
+  html?: string
+  /** Back-reference to the item this derivative was generated from. */
+  derivedFromItemId?: string
+  /** Short tag describing the variation kind (e.g. "cool-mist", "pricing
+   *  reframe") — surfaced as a small badge on the derived card. */
+  derivedFromLabel?: string
   error?: string
 }
 
 /* ============================================================
-   Derivatives — Phase 5: design-system-driven HTML codegen.
+   Derivatives — in-flight progress record used by DeriveModal to render
+   the per-job progress list while codegen is running. The actual durable
+   record is a regular Item with kind='image', html, derivedFromItemId.
    ============================================================ */
 
-export interface Derivative {
+export interface DeriveJob {
   id: string
   /** What kind of variation this is — color shift vs content rewrite. */
   kind: 'color' | 'content'
-  /** Short human label (e.g. "Cool mist", "Pricing page reframe"). */
+  /** Short human label (e.g. "cool-mist", "pricing reframe"). */
   label: string
-  /** For multi-page items (link kind), which page this derivative is based on. */
-  parentPageName?: string
-  /** Single-file HTML (inline CSS) the model produced. */
-  html: string
-  /** Rendered preview screenshot (data: URL) — used as the card thumbnail. */
-  screenshot?: string
-  /** Palette override applied (color variations only). */
-  palette?: PaletteRole[]
-  /** User-supplied prompt that drove the rewrite (content variations only). */
-  contentPrompt?: string
-  createdAt: number
-  /** True while the codegen call is in flight — UI renders a shimmer card.
-   *  Cleared (or omitted) once html lands. */
-  pending?: boolean
-  /** Set if generation or capture failed — UI shows a retry. */
+  /** ID of the Item this job produces — set the moment the placeholder Item
+   *  is added to the store so we can patch it on completion. */
+  itemId: string
+  /** 'pending' until the codegen + capture promise settles. */
+  status: 'pending' | 'done' | 'error'
   error?: string
 }
 
