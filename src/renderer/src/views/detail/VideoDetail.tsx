@@ -74,6 +74,11 @@ export function VideoDetail({
   const frames = doc.pages || []
   const showFrame = hoverFrame ?? frame
   const current = frames[showFrame] || frames[0]
+  // Multi-page image items reuse this component but call them "images" and
+  // hide the ▶ playback (no motion to scrub through).
+  const isGroup = item.kind === 'image'
+  const unitWord = isGroup ? 'image' : 'frame'
+  const unitWordCap = isGroup ? 'Image' : 'Frame'
 
   // Auto-cycle frames when "play" is on. Pauses if the user starts scrubbing.
   useEffect(() => {
@@ -116,14 +121,16 @@ export function VideoDetail({
               {current ? ` · ${current.name}` : ''}
             </span>
           </div>
-          <button
-            onClick={() => setPlaying((p) => !p)}
-            className="ui-btn default sm no-drag"
-            title={playing ? 'Pause' : 'Play sequence'}
-            style={{ minWidth: 0, padding: '0 10px' }}
-          >
-            {playing ? '❚❚' : '▶'}
-          </button>
+          {!isGroup && (
+            <button
+              onClick={() => setPlaying((p) => !p)}
+              className="ui-btn default sm no-drag"
+              title={playing ? 'Pause' : 'Play sequence'}
+              style={{ minWidth: 0, padding: '0 10px' }}
+            >
+              {playing ? '❚❚' : '▶'}
+            </button>
+          )}
           <div className="muted mono" style={{ fontSize: 11, marginLeft: 6 }}>
             {frames.length ? `${showFrame + 1} / ${frames.length}` : '—'}
           </div>
@@ -164,7 +171,7 @@ export function VideoDetail({
                 }}
               >
                 <span className="muted mono" style={{ fontSize: 11, marginRight: 8 }}>
-                  FRAME {showFrame + 1}
+                  {unitWordCap.toUpperCase()} {showFrame + 1}
                 </span>
                 {current.motionDescription}
               </div>
@@ -225,7 +232,8 @@ export function VideoDetail({
         <div className="detail-head">
           <h2>{doc.title || item.title}</h2>
           <div className="muted mono" style={{ fontSize: 11 }}>
-            video · {frames.length} frames
+            {isGroup ? 'image group' : 'video'} · {frames.length} {unitWord}
+            {frames.length === 1 ? '' : 's'}
           </div>
           <div className="tag-row">
             {(doc.tags || []).map((t) => (

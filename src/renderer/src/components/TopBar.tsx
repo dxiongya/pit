@@ -11,6 +11,7 @@ export function TopBar({
   navigate,
   openShare,
   openRecord,
+  openGroup,
   openSettings
 }: {
   view: View
@@ -18,6 +19,7 @@ export function TopBar({
   navigate: (v: View, id?: string) => void
   openShare: () => void
   openRecord: () => void
+  openGroup: () => void
   openSettings: () => void
 }): React.JSX.Element {
   const { collections, settings, setSetting } = useStore()
@@ -61,6 +63,14 @@ export function TopBar({
       <div className="kbd-hint no-drag" title="Press ⌘V anywhere to paste a link or image">
         <I.Link size={13} /> <span className="kbd">⌘V</span> to paste
       </div>
+      <IconButton
+        size="sm"
+        className="no-drag"
+        onClick={openGroup}
+        title="Import a group of related images as one design study"
+      >
+        <I.Layers size={15} />
+      </IconButton>
       <IconButton size="sm" className="no-drag" onClick={openRecord} title="Record screen">
         <span className="rec-dot" />
       </IconButton>

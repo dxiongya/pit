@@ -14,6 +14,7 @@ import { DetailOverlay } from './views/detail/DetailOverlay'
 import { ShareModal, type ShareTarget } from './views/detail/ShareModal'
 import { ReceiveShareModal } from './views/detail/ReceiveShareModal'
 import { RecordingSession } from './views/detail/RecordingSession'
+import { GroupImportModal } from './views/detail/GroupImportModal'
 
 function Shell(): React.JSX.Element {
   const {
@@ -32,6 +33,7 @@ function Shell(): React.JSX.Element {
   const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null)
   // Set by `pit://share/<code>` deep links delivered to the main process.
   const [incomingShareCode, setIncomingShareCode] = useState<string | null>(null)
+  const [groupImportOpen, setGroupImportOpen] = useState(false)
   // null = creating a new collection; set = editing the one with this id
   const [editingCollectionId, setEditingCollectionId] = useState<string | null>(null)
   const editingCollection = editingCollectionId
@@ -63,19 +65,23 @@ function Shell(): React.JSX.Element {
       const el = document.activeElement as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable))
         return
-      const imgItem = Array.from(dt.items).find((i) => i.type.startsWith('image/'))
-      if (imgItem) {
-        const file = imgItem.getAsFile()
-        if (file) {
-          e.preventDefault()
+      const imgItems = Array.from(dt.items).filter((i) => i.type.startsWith('image/'))
+      if (imgItems.length > 0) {
+        e.preventDefault()
+        const files = imgItems
+          .map((i) => i.getAsFile())
+          .filter((f): f is File => f != null)
+        for (const f of files) {
           const reader = new FileReader()
-          reader.onload = (): void => {
-            importImage(reader.result as string)
-            toast.push('Importing image…')
-          }
-          reader.readAsDataURL(file)
-          return
+          reader.onload = (): void => importImage(reader.result as string)
+          reader.readAsDataURL(f)
         }
+        toast.push(
+          files.length > 1
+            ? `Importing ${files.length} images… (use "Group" in the top bar to combine into one design study)`
+            : 'Importing image…'
+        )
+        return
       }
       const text = dt.getData('text/plain').trim()
       if (text && !/\s/.test(text) && /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}/i.test(text)) {
@@ -247,6 +253,7 @@ function Shell(): React.JSX.Element {
           navigate={navigate}
           openShare={openShareForCurrentView}
           openRecord={() => void window.pit.rec.openToolbar()}
+          openGroup={() => setGroupImportOpen(true)}
           openSettings={() => navigate('settings')}
         />
 
@@ -319,6 +326,7 @@ function Shell(): React.JSX.Element {
       {/* Hidden — listens for pit:rec:begin from the toolbar window and runs
           the MediaRecorder lifecycle for that session. No UI of its own. */}
       <RecordingSession />
+      {groupImportOpen && <GroupImportModal onClose={() => setGroupImportOpen(false)} />}
     </div>
   )
 }

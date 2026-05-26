@@ -203,6 +203,10 @@ interface StoreValue {
     originalName?: string,
     cropRect?: { x: number; y: number; w: number; h: number }
   ) => void
+  /** Import a *group* of related images as a single design-study Item — runs
+   *  one batched AI analysis across all images (palette + theme + per-image
+   *  motion/description + unified replica). Used from the GroupImportModal. */
+  importImageGroup: (dataUrls: string[], title?: string) => void
   /** Re-run AI analysis on an existing video item using its already-extracted
    *  keyframes. Useful when the first analyze pass failed (e.g. provider
    *  quota / geo block) and the user switched models in Settings. */
@@ -615,6 +619,78 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
     [settings.ai, collections, addItem, updateItem, moveItem]
   )
 
+  // Import a group of related images as ONE design-study Item.
+  // Reuses analyzeVideoFrames since the AI shape is identical: a batch of
+  // image inputs → unified design tokens + per-input caption + replica.
+  const importImageGroup = useCallback(
+    (dataUrls: string[], title?: string) => {
+      const valid = dataUrls.filter((u) => typeof u === 'string' && u.startsWith('data:'))
+      if (valid.length === 0) return
+      const id = uid()
+      const groupTitle = title?.trim() || `Design study · ${valid.length} images`
+      addItem({
+        id,
+        kind: 'image',
+        collection: 'inbox',
+        title: groupTitle,
+        status: 'analyzing',
+        progress: `Analyzing ${valid.length} images…`,
+        createdAt: Date.now(),
+        screenshot: valid[0]
+      })
+      let stream = ''
+      void (async () => {
+        try {
+          const { doc, motionDescriptions, source, error } = await analyzeVideoFrames(
+            valid,
+            groupTitle,
+            settings.ai,
+            (c) => {
+              stream += c
+              updateItem(id, { streamText: stream })
+            }
+          )
+          const pages = valid.map((u, i) => ({
+            name: `Image ${i + 1}`,
+            status: 'done' as const,
+            screenshot: u,
+            motionDescription: motionDescriptions?.[i]
+          }))
+          updateItem(id, {
+            status: 'ready',
+            progress: undefined,
+            design: { ...doc, pages },
+            title: doc.title || groupTitle,
+            tags: doc.tags,
+            prompt: doc.stylePrompt || doc.agentPrompt,
+            palette: doc.palette?.map((p) => p.hex),
+            screenshot: valid[0],
+            error: source === 'mock' ? error : undefined
+          })
+          if (settings.ai.features.autoRoute) {
+            void routeItem(
+              {
+                title: doc.title || groupTitle,
+                prompt: doc.sequence || doc.description || doc.stylePrompt,
+                tags: doc.tags
+              },
+              collections,
+              settings.ai
+            ).then((r) => {
+              if (r.best && r.best !== 'inbox') moveItem(id, r.best)
+            })
+          }
+        } catch (e) {
+          updateItem(id, {
+            status: 'failed',
+            error: e instanceof Error ? e.message : 'group import failed'
+          })
+        }
+      })()
+    },
+    [settings.ai, collections, addItem, updateItem, moveItem]
+  )
+
   // Re-run analysis on an existing video item (frames already in DB) — the
   // user typically lands here after the first attempt failed (provider quota
   // / geo block) and they fixed it via Settings + want to retry without
@@ -688,6 +764,7 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
       importLink,
       importImage,
       importVideo,
+      importImageGroup,
       reanalyzeVideo
     }),
     [
@@ -706,6 +783,7 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
       importLink,
       importImage,
       importVideo,
+      importImageGroup,
       reanalyzeVideo
     ]
   )

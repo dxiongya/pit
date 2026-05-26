@@ -87,7 +87,11 @@ export function DetailOverlay({
           <AnalyzingDetail item={item} />
         ) : item.kind === 'link' ? (
           <LinkDetail item={item} onShare={onShare} />
-        ) : item.kind === 'video' ? (
+        ) : item.kind === 'video' ||
+          // Image GROUPS (imported via GroupImportModal) get the multi-frame
+          // strip viewer too — VideoDetail handles the page-switch UX cleanly
+          // and adapts labels based on item.kind.
+          (item.kind === 'image' && (item.design?.pages?.length ?? 0) > 1) ? (
           <VideoDetail item={item} onShare={onShare} />
         ) : (
           <ImageDetail item={item} onShare={onShare} />
