@@ -19,6 +19,7 @@ import { copyToClipboard, useToast } from '../../components/Toast'
 import { Button } from '../../components/ui'
 import { useStore } from '../../lib/store'
 import { Lightbox } from './Lightbox'
+import { ErrorBanner } from './ErrorBanner'
 import {
   PromptTab,
   ThemeAnalysis,
@@ -265,33 +266,11 @@ export function VideoDetail({
         </div>
 
         {item.error && (
-          <div
-            style={{
-              margin: '12px 0 4px',
-              padding: '10px 12px',
-              background: 'color-mix(in oklab, #ff453a 10%, var(--bg-card))',
-              borderLeft: '3px solid #ff453a',
-              borderRadius: 6,
-              fontSize: 12,
-              color: 'var(--ink-2)',
-              lineHeight: 1.5
-            }}
-            title={item.error}
-          >
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <div style={{ flex: 1 }}>
-                <strong style={{ color: '#ff453a' }}>Analysis failed.</strong>{' '}
-                {parseHumanError(item.error)}
-              </div>
-              <Button
-                size="sm"
-                onClick={() => reanalyzeVideo(item.id)}
-                title="Re-run analysis on the existing keyframes"
-              >
-                <I.Sparkles size={12} /> Retry
-              </Button>
-            </div>
-          </div>
+          <ErrorBanner
+            error={item.error}
+            hint={parseHumanError(item.error)}
+            onRetry={() => reanalyzeVideo(item.id)}
+          />
         )}
 
         <div className="detail-tabs">

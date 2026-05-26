@@ -501,6 +501,83 @@ body[data-cols="6"] .masonry { --cols: 6; }
   background: color-mix(in oklab, #ff453a 8%, var(--bg-soft));
 }
 
+/* Detail error banner — shared "Analysis failed" strip used by Video/Image/
+ * Link detail views when item.error is set. Soft red-tinted background,
+ * warning glyph in a circle, title + short hint, optional Retry pill on the
+ * right with a refresh-arrow icon. */
+.detail-err-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 4px 6px;
+  padding: 11px 14px 11px 12px;
+  background: color-mix(in oklab, #ff453a 7%, var(--bg-card));
+  border: 1px solid color-mix(in oklab, #ff453a 18%, var(--hair));
+  border-left-width: 3px;
+  border-left-color: #ff453a;
+  border-radius: 8px;
+}
+.detail-err-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: color-mix(in oklab, #ff453a 16%, var(--bg-card));
+  color: #ff453a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 26px;
+}
+.detail-err-body {
+  flex: 1;
+  min-width: 0;
+}
+.detail-err-title {
+  color: #ff453a;
+  font-weight: 600;
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+.detail-err-msg {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  line-height: 1.4;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.detail-err-retry {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px;
+  background: var(--bg-card);
+  border: 1px solid color-mix(in oklab, #ff453a 28%, var(--hair-2));
+  color: #ff453a;
+  border-radius: 6px;
+  font-family: var(--f-ui);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease,
+    transform 0.08s ease;
+}
+.detail-err-retry:hover {
+  background: #ff453a;
+  border-color: #ff453a;
+  color: #fff;
+}
+.detail-err-retry:active {
+  transform: scale(0.97);
+}
+
 /* Lightbox — full-window image viewer with zoom + pan. Mounted via portal-
  * style sibling of the detail overlay, sits above with its own backdrop. */
 .lightbox {
