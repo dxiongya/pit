@@ -277,12 +277,14 @@ async function callModelStreamOnce(
     if (!reader) throw new Error('No response stream')
     const dec = new TextDecoder()
     let buf = ''
-    // Idle timeout — if the server stops sending for 30s, abort and let the
-    // outer retry kick in. Resets on every chunk we actually receive.
+    // Idle timeout — if the server stops sending for 90s, abort and let the
+    // outer retry kick in. Resets on every chunk we actually receive. Set
+    // generously because GLM / DeepSeek can take 30-60s of "warming" before
+    // the first token on long structured outputs (replica + JSON).
     let idle: ReturnType<typeof setTimeout> | null = null
     const resetIdle = (): void => {
       if (idle) clearTimeout(idle)
-      idle = setTimeout(() => ctrl.abort(), 30000)
+      idle = setTimeout(() => ctrl.abort(), 90000)
     }
     resetIdle()
     try {
