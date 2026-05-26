@@ -7,12 +7,16 @@ import App from './App'
 import { RecorderControl } from './recorder/RecorderControl'
 import { RecorderBorder } from './recorder/RecorderBorder'
 import { RegionPicker } from './recorder/RegionPicker'
+import { RecorderToolbar } from './recorder/RecorderToolbar'
 
 // Hash routing — accessory recorder windows load the same renderer build
 // with a different #/ fragment so we can ship one bundle and fan out at boot.
 const hash = window.location.hash
 let element: React.JSX.Element
-if (hash === '#/recorder-control') {
+if (hash === '#/recorder-toolbar') {
+  document.body.classList.add('recorder-mode')
+  element = <RecorderToolbar />
+} else if (hash === '#/recorder-control') {
   document.body.classList.add('recorder-mode')
   element = <RecorderControl />
 } else if (hash === '#/recorder-border') {

@@ -121,6 +121,43 @@ const pit = {
   // RecordModal in the main window and by the small accessory windows loaded
   // with #/recorder-* hash routes.
   rec: {
+    // Entry — pit TopBar Record button. Minimizes pit and opens the bottom
+    // toolbar in its own BrowserWindow (#/recorder-toolbar).
+    openToolbar: (): Promise<void> => ipcRenderer.invoke('pit:rec:open-toolbar'),
+    // Toolbar → main → main-pit-window: begin the actual recording. Closes
+    // toolbar, spawns float widget + border.
+    begin: (opts: {
+      mode: 'screen' | 'window' | 'region'
+      sourceId?: string
+      audio: boolean
+      cropRect?: { x: number; y: number; w: number; h: number }
+      sourceLabel?: string
+    }): void => ipcRenderer.send('pit:rec:begin', opts),
+    // Toolbar cancel without recording.
+    cancelToolbar: (): void => ipcRenderer.send('pit:rec:cancel-toolbar'),
+    // Subscribe (main pit window) to the begin signal.
+    onBegin: (
+      cb: (opts: {
+        mode: 'screen' | 'window' | 'region'
+        sourceId?: string
+        audio: boolean
+        cropRect?: { x: number; y: number; w: number; h: number }
+        sourceLabel?: string
+      }) => void
+    ): (() => void) => {
+      const listener = (
+        _e: IpcRendererEvent,
+        p: {
+          mode: 'screen' | 'window' | 'region'
+          sourceId?: string
+          audio: boolean
+          cropRect?: { x: number; y: number; w: number; h: number }
+          sourceLabel?: string
+        }
+      ): void => cb(p)
+      ipcRenderer.on('pit:rec:begin', listener)
+      return () => ipcRenderer.removeListener('pit:rec:begin', listener)
+    },
     startChrome: (opts: { mode: 'screen' | 'window' | 'region'; displayId?: number }): Promise<void> =>
       ipcRenderer.invoke('pit:rec:start-chrome', opts),
     stopChrome: (): Promise<void> => ipcRenderer.invoke('pit:rec:stop-chrome'),

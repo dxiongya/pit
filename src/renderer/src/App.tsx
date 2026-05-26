@@ -13,7 +13,7 @@ import { SettingsView } from './views/SettingsView'
 import { DetailOverlay } from './views/detail/DetailOverlay'
 import { ShareModal, type ShareTarget } from './views/detail/ShareModal'
 import { ReceiveShareModal } from './views/detail/ReceiveShareModal'
-import { RecordModal } from './views/detail/RecordModal'
+import { RecordingSession } from './views/detail/RecordingSession'
 
 function Shell(): React.JSX.Element {
   const {
@@ -32,7 +32,6 @@ function Shell(): React.JSX.Element {
   const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null)
   // Set by `pit://share/<code>` deep links delivered to the main process.
   const [incomingShareCode, setIncomingShareCode] = useState<string | null>(null)
-  const [recordOpen, setRecordOpen] = useState(false)
   // null = creating a new collection; set = editing the one with this id
   const [editingCollectionId, setEditingCollectionId] = useState<string | null>(null)
   const editingCollection = editingCollectionId
@@ -247,7 +246,7 @@ function Shell(): React.JSX.Element {
           collectionId={collectionId}
           navigate={navigate}
           openShare={openShareForCurrentView}
-          openRecord={() => setRecordOpen(true)}
+          openRecord={() => void window.pit.rec.openToolbar()}
           openSettings={() => navigate('settings')}
         />
 
@@ -317,7 +316,9 @@ function Shell(): React.JSX.Element {
           }}
         />
       )}
-      {recordOpen && <RecordModal onClose={() => setRecordOpen(false)} />}
+      {/* Hidden — listens for pit:rec:begin from the toolbar window and runs
+          the MediaRecorder lifecycle for that session. No UI of its own. */}
+      <RecordingSession />
     </div>
   )
 }

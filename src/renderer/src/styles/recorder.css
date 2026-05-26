@@ -2,6 +2,244 @@
  * Each style block is scoped to its #/recorder-* route's root element.
  */
 
+/* Bottom picker toolbar — the entry UI shown after the user clicks Record
+ * in pit. Replaces the in-app modal. Pill shape, dark glass, draggable. */
+.rec-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100vh;
+  padding: 0 6px 0 8px;
+  background: rgba(30, 30, 33, 0.94);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Helvetica Neue', sans-serif;
+  font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: drag;
+  position: relative;
+}
+.rec-tb-close,
+.rec-tb-mode,
+.rec-tb-toggle,
+.rec-tb-start,
+.rec-tb-popover {
+  -webkit-app-region: no-drag;
+}
+.rec-tb-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  transition: background 0.12s ease;
+}
+.rec-tb-close:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.rec-tb-modes {
+  display: flex;
+  gap: 2px;
+  padding: 0 2px;
+}
+.rec-tb-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 64px;
+  padding: 8px 4px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  border-radius: 8px;
+  font-family: inherit;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.rec-tb-mode:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+.rec-tb-mode.active {
+  color: #fff;
+}
+.rec-tb-mode-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rec-tb-mode-label {
+  font-size: 11px;
+  font-weight: 500;
+}
+.rec-tb-sep {
+  width: 1px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
+.rec-tb-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12px;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.rec-tb-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+.rec-tb-toggle.on {
+  color: #fff;
+}
+.rec-tb-spacer {
+  flex: 1;
+  min-width: 12px;
+}
+.rec-tb-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  background: #5b50e6;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    transform 0.08s ease;
+}
+.rec-tb-start:hover:not(:disabled) {
+  background: #6f64f5;
+}
+.rec-tb-start:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.rec-tb-start:disabled {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: not-allowed;
+}
+.rec-tb-start-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff453a;
+}
+
+/* Window picker popover above the toolbar */
+.rec-tb-popover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 10px);
+  background: rgba(30, 30, 33, 0.96);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  padding: 12px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+.rec-tb-popover-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 8px;
+}
+.rec-tb-popover-empty {
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  padding: 20px;
+  font-size: 12px;
+}
+.rec-tb-popover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.rec-tb-popover-card {
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  cursor: pointer;
+  color: #fff;
+  text-align: left;
+  font-family: inherit;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+.rec-tb-popover-card:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.rec-tb-popover-card.chosen {
+  border-color: #5b50e6;
+}
+.rec-tb-popover-card img {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.rec-tb-popover-name {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-tb-err {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: rgba(255, 69, 58, 0.9);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  text-align: center;
+}
+
 /* Float widget container — small pill, dark glass, drag-to-move. */
 .rec-float {
   display: flex;

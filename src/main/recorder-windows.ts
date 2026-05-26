@@ -15,6 +15,7 @@ import { BrowserWindow, ipcMain, screen, app } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 
+let toolbarWin: BrowserWindow | null = null
 let floatWin: BrowserWindow | null = null
 let borderWin: BrowserWindow | null = null
 let regionWin: BrowserWindow | null = null
@@ -37,9 +38,69 @@ function preloadPath(): string {
 function findMainWindow(): BrowserWindow | null {
   return (
     BrowserWindow.getAllWindows().find(
-      (w) => w !== floatWin && w !== borderWin && w !== regionWin
+      (w) => w !== floatWin && w !== borderWin && w !== regionWin && w !== toolbarWin
     ) || null
   )
+}
+
+/**
+ * Open the bottom picker toolbar. This is the entry point for a recording
+ * session: pit minimizes and the user picks mode + audio + (later) source in
+ * the toolbar before clicking Start. Replaces the in-app modal flow.
+ */
+export function openToolbar(): void {
+  if (toolbarWin && !toolbarWin.isDestroyed()) {
+    toolbarWin.focus()
+    return
+  }
+  mainBeforeRecord = findMainWindow()
+  if (mainBeforeRecord) mainBeforeRecord.minimize()
+
+  const primary = screen.getPrimaryDisplay()
+  const w = 720
+  const h = 84
+  toolbarWin = new BrowserWindow({
+    width: w,
+    height: h,
+    x: Math.round(primary.workArea.x + (primary.workArea.width - w) / 2),
+    y: primary.workArea.y + primary.workArea.height - h - 28,
+    frame: false,
+    transparent: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    movable: true,
+    show: false,
+    webPreferences: {
+      preload: preloadPath(),
+      sandbox: false
+    }
+  })
+  toolbarWin.setAlwaysOnTop(true, 'pop-up-menu')
+  toolbarWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  toolbarWin.loadURL(rendererUrl('/recorder-toolbar'))
+  toolbarWin.once('ready-to-show', () => toolbarWin?.show())
+
+  toolbarWin.on('closed', () => {
+    toolbarWin = null
+    // If toolbar was closed WITHOUT a recording having begun (user X'd out)
+    // then no float/border is up — restore main here.
+    if (!floatWin && mainBeforeRecord && !mainBeforeRecord.isDestroyed()) {
+      mainBeforeRecord.restore()
+      mainBeforeRecord.focus()
+      mainBeforeRecord = null
+    }
+  })
+}
+
+/** Close the toolbar without restoring main (called when recording begins). */
+export function closeToolbar(): void {
+  if (toolbarWin && !toolbarWin.isDestroyed()) toolbarWin.close()
+  toolbarWin = null
 }
 
 interface StartOpts {
@@ -50,12 +111,10 @@ interface StartOpts {
 }
 
 export function startRecorderChrome(opts: StartOpts): void {
-  // Stash + minimize the main window so the recording target isn't pit itself.
-  mainBeforeRecord = findMainWindow()
-  if (mainBeforeRecord) {
-    // minimize() is more reliable than hide() for restoring focus/position.
-    mainBeforeRecord.minimize()
-  }
+  // Toolbar has already minimized main and is now being closed; just track
+  // main here in case openToolbar() wasn't the entry point (legacy callers).
+  if (!mainBeforeRecord) mainBeforeRecord = findMainWindow()
+  if (mainBeforeRecord && !mainBeforeRecord.isMinimized()) mainBeforeRecord.minimize()
 
   // Float widget — small pill near the top-center of the primary display.
   const primary = screen.getPrimaryDisplay()

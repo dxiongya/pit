@@ -37,7 +37,9 @@ import {
   stopRecorderChrome,
   pickRegion,
   relayControl,
-  pushFloatState
+  pushFloatState,
+  openToolbar,
+  closeToolbar
 } from './recorder-windows'
 
 function createWindow(): void {
@@ -167,9 +169,33 @@ function registerIpc(): void {
     }
   )
 
-  // Recorder chrome — orchestrates the floating control widget, the border
-  // overlay, and main-window minimize/restore around a recording session.
-  // MediaRecorder itself stays in the main window's RecordModal renderer.
+  // Recorder chrome — orchestrates the bottom picker toolbar, the floating
+  // control widget, the border overlay, and main-window minimize/restore.
+  // MediaRecorder lives in the (minimized) main pit window's RecordingSession.
+
+  // Entry point — pit TopBar Record click. Minimizes main, opens toolbar.
+  ipcMain.handle('pit:rec:open-toolbar', () => openToolbar())
+  // Toolbar tells main pit window to begin the recording session.
+  ipcMain.on(
+    'pit:rec:begin',
+    (_e, opts: {
+      mode: 'screen' | 'window' | 'region'
+      sourceId?: string
+      audio: boolean
+      cropRect?: { x: number; y: number; w: number; h: number }
+      sourceLabel?: string
+    }) => {
+      // Close toolbar; spawn float + border. Then ask main pit window to
+      // initiate the actual MediaRecorder.
+      closeToolbar()
+      startRecorderChrome({ mode: opts.mode })
+      const main = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+      if (main) main.webContents.send('pit:rec:begin', opts)
+    }
+  )
+  // Toolbar cancel — closes toolbar; restore happens in toolbar 'closed' hook.
+  ipcMain.on('pit:rec:cancel-toolbar', () => closeToolbar())
+
   ipcMain.handle(
     'pit:rec:start-chrome',
     (_e, opts: { mode: 'screen' | 'window' | 'region'; displayId?: number }) => {
