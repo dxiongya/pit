@@ -38,6 +38,8 @@ import {
   deriveOne,
   type DerivedOne
 } from './derive'
+import { extractLink } from './link-handlers/registry'
+import { downloadToDataUrl } from './link-handlers/util'
 import {
   startRecorderChrome,
   stopRecorderChrome,
@@ -142,6 +144,35 @@ function registerIpc(): void {
   ipcMain.on('pit:drag-images', (e, payload: { dataUrls: string[]; name?: string }) => {
     void startImageDrag(e.sender, payload.dataUrls, payload.name)
   })
+
+  // Link handlers — extract structured content (tweet / xhs / generic site)
+  // from a URL. The renderer dispatches the result into the right import
+  // pipeline based on the returned media counts.
+  ipcMain.handle(
+    'pit:link:extract',
+    (
+      _e,
+      input: { url: string; integrations?: { twitter?: { baseURL: string; apiKey: string } } }
+    ) => extractLink(input.url, { integrations: input.integrations })
+  )
+  // Save a remote media URL (video typically) to a tmp file and return its
+  // local path — the renderer hands that path to importVideo for keyframe
+  // extraction.
+  ipcMain.handle(
+    'pit:link:fetch-to-tmp',
+    async (_e, input: { url: string; ext?: string }): Promise<{ path: string }> => {
+      const dataUrl = await downloadToDataUrl(input.url)
+      const base64 = dataUrl.split(',')[1] || ''
+      const bytes = Buffer.from(base64, 'base64')
+      const dir = mkdtempSync(join(tmpdir(), 'pit-media-'))
+      const ext =
+        input.ext ||
+        (dataUrl.match(/^data:[^/]+\/([^;]+)/)?.[1] || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const path = join(dir, `media.${ext}`)
+      writeFileSync(path, bytes)
+      return { path }
+    }
+  )
 
   // pit.ink share — POST to the share API, returns { code, url, hasPassword, expiresAt }.
   ipcMain.handle('pit:share:create', (_e, input: ShareCreateInput) => createShare(input))

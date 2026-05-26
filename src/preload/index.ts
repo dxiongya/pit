@@ -59,6 +59,26 @@ const pit = {
   // by webContents.startDrag.
   dragImages: (dataUrls: string[], name?: string): void =>
     ipcRenderer.send('pit:drag-images', { dataUrls, name }),
+  // Link handlers — source-specific extractors (Twitter via xapi.to,
+  // Xiaohongshu scrape, generic site capture). Dispatch happens in main.
+  link: {
+    extract: (input: {
+      url: string
+      integrations?: { twitter?: { baseURL: string; apiKey: string } }
+    }): Promise<{
+      kind: 'tweet' | 'note' | 'site' | 'media'
+      title: string
+      author?: string
+      canonicalUrl: string
+      text?: string
+      images: { src: string; caption?: string; width?: number; height?: number }[]
+      videos: { src: string; caption?: string }[]
+      capturedPages?: unknown[]
+      warning?: string
+    }> => ipcRenderer.invoke('pit:link:extract', input),
+    fetchToTmp: (input: { url: string; ext?: string }): Promise<{ path: string }> =>
+      ipcRenderer.invoke('pit:link:fetch-to-tmp', input)
+  },
   // Derive — generate HTML variants from an analyzed item's design.
   derive: {
     proposePalettes: (input: {

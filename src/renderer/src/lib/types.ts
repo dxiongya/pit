@@ -311,6 +311,20 @@ export interface AISettings {
   }
 }
 
+/**
+ * Third-party integrations — credentials for source-specific link handlers
+ * (Twitter via xapi.to, future Instagram/Pinterest/etc.). Distinct from
+ * AISettings because they're not AI providers but data gateways.
+ */
+export interface IntegrationsSettings {
+  twitter?: {
+    /** xapi.to base URL (e.g. https://xapi.to). */
+    baseURL: string
+    /** Bearer / x-api-key value passed by the handler. */
+    apiKey: string
+  }
+}
+
 export interface AppSettings {
   theme: 'light' | 'dark'
   accent: string
@@ -318,4 +332,7 @@ export interface AppSettings {
   density: 'compact' | 'comfortable' | 'spacious'
   cols: number
   ai: AISettings
+  /** Per-handler third-party API creds. Optional — handlers that need a
+   *  slice but don't find it throw a "configure in Settings" error. */
+  integrations?: IntegrationsSettings
 }

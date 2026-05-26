@@ -32,6 +32,31 @@ import {
 } from './ai/provider'
 import { lookupModel } from './catalog/lookup'
 
+/**
+ * Hosts that should be routed through a source-specific link handler in main
+ * (extracts embedded media instead of generic site capture). Kept in sync
+ * with the handlers registered in src/main/link-handlers/registry.ts.
+ */
+function isSpecialLink(url: string): boolean {
+  try {
+    const u = new URL(url.startsWith('http') ? url : `https://${url}`)
+    const h = u.hostname.toLowerCase()
+    return (
+      h === 'twitter.com' ||
+      h === 'www.twitter.com' ||
+      h === 'x.com' ||
+      h === 'www.x.com' ||
+      h === 'mobile.twitter.com' ||
+      h === 'xiaohongshu.com' ||
+      h === 'www.xiaohongshu.com' ||
+      h === 'xhslink.com' ||
+      h.endsWith('.xiaohongshu.com')
+    )
+  } catch {
+    return false
+  }
+}
+
 function uid(): string {
   return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
 }
@@ -399,8 +424,86 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
     },
     [settings.ai, collections, addItem, updateItem, moveItem]
   )
+  // Special-URL dispatch: when the URL matches a source-specific extractor
+  // (Twitter, Xiaohongshu, …) we don't run the generic site capture — we
+  // ask main's link-handler registry to extract structured media, then funnel
+  // those media through the existing image / image-group / video importers.
+  // A stub item appears immediately so the user sees progress while extract
+  // is in flight; on result the stub is replaced (or marked failed).
+  const importViaHandler = useCallback(
+    async (url: string) => {
+      const stubId = uid()
+      const host = hostOf(url)
+      addItem({
+        id: stubId,
+        kind: 'image',
+        collection: 'inbox',
+        title: host,
+        url,
+        status: 'analyzing',
+        progress: `Extracting from ${host}…`,
+        createdAt: Date.now()
+      })
+      try {
+        const ext = await window.pit.link.extract({
+          url,
+          integrations: settings.integrations as
+            | { twitter?: { baseURL: string; apiKey: string } }
+            | undefined
+        })
+        // Promote the stub into the right kind based on what came back.
+        if (ext.videos.length > 0) {
+          // Video wins over images when both exist (most tweet/note videos
+          // are the primary media; thumbnails are just stills).
+          removeItem(stubId)
+          const v = ext.videos[0]
+          const path = v.src.startsWith('data:')
+            ? (await window.pit.capture.saveBlob({
+                bytes: new Uint8Array(
+                  Buffer.from(v.src.split(',')[1] || '', 'base64')
+                )
+              })).path
+            : (await window.pit.link.fetchToTmp({ url: v.src, ext: 'mp4' })).path
+          importVideo(path, ext.title)
+        } else if (ext.images.length === 1) {
+          removeItem(stubId)
+          importImage(ext.images[0].src)
+        } else if (ext.images.length >= 2) {
+          removeItem(stubId)
+          importImageGroup(
+            ext.images.map((i) => i.src),
+            ext.title
+          )
+        } else {
+          updateItem(stubId, {
+            status: 'failed',
+            error:
+              ext.warning ||
+              `No media found in this ${ext.kind} — try a different link or use the generic capture flow.`,
+            progress: undefined
+          })
+        }
+      } catch (e) {
+        updateItem(stubId, {
+          status: 'failed',
+          error: e instanceof Error ? e.message : 'extract failed',
+          progress: undefined
+        })
+      }
+    },
+    [settings.integrations, addItem, updateItem, removeItem]
+  )
+
   const importLink = useCallback(
     (url: string) => {
+      // First: see if a source-specific handler claims this URL (Twitter,
+      // Xiaohongshu, …). Those extract embedded media and reroute into the
+      // image / image-group / video import pipelines. Generic web pages
+      // continue down the original captureSite + analyzeSite path.
+      if (isSpecialLink(url)) {
+        void importViaHandler(url)
+        return
+      }
       const id = uid()
       addItem({
         id,
