@@ -1,16 +1,24 @@
 // ai.ts — main-process AI calls.
 //
-// Today: real credential verification per provider (a cheap `/models` GET).
-// Reserved next: analyzeSite / analyzeImage / route, which will send the
-// design-analyst SKILL.md as system prompt + the output-schema.json contract.
+// Real, fully-wired provider client (Anthropic / OpenAI / Google / any
+// OpenAI-compatible endpoint): credential verification, streaming + non-stream
+// design analysis for sites / images / video, routing classification, and
+// collection-description generation. Every call hits a live HTTP API — there is
+// no mock path here; an unconfigured provider errors rather than returning stub
+// data. Output is structured JSON parsed via extractJson().
 
-export interface RoleRequest {
-  kind: 'anthropic' | 'openai' | 'google' | 'openai-compatible'
-  name?: string
-  model: string
-  apiKey: string
-  baseURL?: string
-}
+import type { RoleRequest, RoutingResult, SourceFacts } from '../shared/ipc'
+
+// Re-exported so existing `import { RoleRequest } from './ai'` consumers in main
+// keep working while the canonical definitions live in shared/ipc.ts.
+export type { RoleRequest, RoutingResult }
+
+// Anthropic requires an explicit max_tokens. The design/replica prompts ask for
+// 400+ word structured outputs plus a dozen JSON fields, which can exceed a
+// small cap and get truncated mid-object (then extractJson fails on the whole
+// analysis). Claude models comfortably support this larger budget. OpenAI/Google
+// omit the field entirely and default to the model's full output budget.
+const ANTHROPIC_MAX_TOKENS = 8192
 
 async function getJson(url: string, headers: Record<string, string>): Promise<Response> {
   const ctrl = new AbortController()
@@ -154,7 +162,7 @@ async function callModelOnce(
         },
         body: JSON.stringify({
           model: req.model,
-          max_tokens: 2048,
+          max_tokens: ANTHROPIC_MAX_TOKENS,
           system,
           messages: [{ role: 'user', content }]
         }),
@@ -268,10 +276,22 @@ async function callModelStreamOnce(
   onChunk: (chunk: string) => void
 ): Promise<string> {
   const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), 90000)
+  // First-byte timeout — only covers connection + headers + waiting for the
+  // first SSE event. Once `pump` confirms the response started, we clear this
+  // and hand off to the per-chunk `idle` watchdog. Without this handoff, long
+  // valid completions (e.g. 12-frame video analysis writing a multi-kB JSON)
+  // got killed at 90s even though chunks were arriving.
+  let t: ReturnType<typeof setTimeout> | null = setTimeout(() => ctrl.abort(), 90000)
+  const clearFirstByte = (): void => {
+    if (t) {
+      clearTimeout(t)
+      t = null
+    }
+  }
   const imgs = images.map(parseDataUrl)
   let full = ''
   const pump = async (res: Response, extract: (j: unknown) => string): Promise<void> => {
+    clearFirstByte()
     if (!res.ok) throw new Error(`HTTP ${res.status} ${await safeText(res)}`)
     const reader = res.body?.getReader()
     if (!reader) throw new Error('No response stream')
@@ -335,7 +355,7 @@ async function callModelStreamOnce(
         },
         body: JSON.stringify({
           model: req.model,
-          max_tokens: 2048,
+          max_tokens: ANTHROPIC_MAX_TOKENS,
           system,
           stream: true,
           messages: [{ role: 'user', content }]
@@ -382,37 +402,111 @@ async function callModelStreamOnce(
           ...images.map((u) => ({ type: 'image_url', image_url: { url: u } }))
         ]
       : user
+    const bodyJson = JSON.stringify({
+      model: req.model,
+      temperature: 0,
+      stream: true,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userContent }
+      ]
+    })
+    // eslint-disable-next-line no-console
+    console.log(
+      `[ai] POST ${base}/chat/completions model=${req.model} imgs=${images.length} body=${(bodyJson.length / 1024).toFixed(0)}kB`
+    )
+    const tStart = Date.now()
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         ...(req.apiKey ? { Authorization: `Bearer ${req.apiKey}` } : {})
       },
-      body: JSON.stringify({
-        model: req.model,
-        temperature: 0,
-        stream: true,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: userContent }
-        ]
-      }),
+      body: bodyJson,
       signal: ctrl.signal
     })
+    // eslint-disable-next-line no-console
+    console.log(
+      `[ai] response in ${Date.now() - tStart}ms status=${res.status} content-type=${res.headers.get('content-type')}`
+    )
+    if (!res.ok) {
+      const errBody = await res.text()
+      // eslint-disable-next-line no-console
+      console.log(`[ai] error body: ${errBody.slice(0, 600)}`)
+      throw new Error(`HTTP ${res.status} ${errBody.slice(0, 200)}`)
+    }
     await pump(res, (j) => {
-      const o = j as { choices?: { delta?: { content?: string } }[] }
-      return o.choices?.[0]?.delta?.content ?? ''
+      const o = j as { choices?: { delta?: { content?: string; reasoning_content?: string } }[] }
+      return o.choices?.[0]?.delta?.content ?? o.choices?.[0]?.delta?.reasoning_content ?? ''
     })
     return full
   } finally {
-    clearTimeout(t)
+    clearFirstByte()
   }
 }
 
+/**
+ * Pull a JSON object out of a model response. Models wrap JSON in ``` fences,
+ * prepend prose, or emit a stray brace in the preamble — a naive "first { to
+ * last }" grab breaks on all of those. Strategy:
+ *   1. strip code fences,
+ *   2. try a straight parse (already-clean JSON),
+ *   3. scan every `{` for a balanced, string-aware object and parse it; return
+ *      the LARGEST one that parses (so a prose `{x}` before the real doc, or a
+ *      throwaway object, doesn't win over the actual payload).
+ * Throws a descriptive error (incl. a snippet) when nothing parses — callers
+ * turn that into a visible failure instead of silently corrupting an item.
+ */
 function extractJson<T>(s: string): T {
-  const cleaned = s.replace(/```json\s*|\s*```/g, '')
-  const match = cleaned.match(/\{[\s\S]*\}/)
-  return JSON.parse(match ? match[0] : cleaned) as T
+  const cleaned = s.replace(/```json\s*|```/g, '').trim()
+
+  try {
+    return JSON.parse(cleaned) as T
+  } catch {
+    /* not bare JSON — fall through to balanced-object scan */
+  }
+
+  let best: T | undefined
+  let bestLen = 0
+  for (let i = cleaned.indexOf('{'); i >= 0; i = cleaned.indexOf('{', i + 1)) {
+    const obj = balancedObjectAt(cleaned, i)
+    if (!obj || obj.length <= bestLen) continue
+    try {
+      best = JSON.parse(obj) as T
+      bestLen = obj.length
+    } catch {
+      /* this `{` didn't start a valid object — try the next one */
+    }
+  }
+  if (best !== undefined) return best
+
+  throw new Error(
+    `Model did not return valid JSON (possibly truncated). Got ${cleaned.length} chars starting: ${cleaned.slice(0, 120)}`
+  )
+}
+
+/** Return the balanced `{...}` substring starting at `start`, ignoring braces
+ *  inside strings. Returns null if it never closes (e.g. truncated output). */
+function balancedObjectAt(s: string, start: number): string | null {
+  let depth = 0
+  let inStr = false
+  let escaped = false
+  for (let i = start; i < s.length; i++) {
+    const c = s[i]
+    if (inStr) {
+      if (escaped) escaped = false
+      else if (c === '\\') escaped = true
+      else if (c === '"') inStr = false
+      continue
+    }
+    if (c === '"') inStr = true
+    else if (c === '{') depth++
+    else if (c === '}') {
+      depth--
+      if (depth === 0) return s.slice(start, i + 1)
+    }
+  }
+  return null
 }
 
 /* ============================================================
@@ -424,10 +518,6 @@ interface RouteItemInput {
   item: { title?: string; description?: string; tags?: string[] }
   collections: { id: string; name: string; prompt?: string; tags?: string[]; skip?: string[] }[]
   threshold: number
-}
-interface RoutingResult {
-  suggestions: { collectionId: string; confidence: number; reason: string }[]
-  best: string
 }
 
 const ROUTING_SYSTEM = `You are pit's routing classifier. Decide which collection a newly imported item belongs to by semantic match.
@@ -596,8 +686,10 @@ Fields (awesome-design-md DESIGN.md spec):
 - ia: [{lvl, label, meta}] + layoutNote: "12-col · 1216 max · gutter 24 · asymmetric"
 - motion: [{type, easing, dur, bar:0-100}]
 - dos: 3-5 non-negotiables  ·  donts: 3-5 anti-patterns
-- responsive: breakpoints/touch/collapse  ·  a11y: [{label, grade:A|B|C, detail}]
+- responsive: ONE STRING summarising breakpoints, touch targets, and collapse rules (e.g. "Mobile <760px: 1 column, hero clamps 32→64px, touch targets ≥44px, sidebar collapses to bottom sheet"). NEVER an object.  ·  a11y: [{label, grade:A|B|C, detail}]
 - tags (lowercase-hyphenated); title; assetType:"web-page"; confidence (0-100)
+
+GROUND TRUTH: a JSON block of REAL values extracted from the live page source (computed colors, actual font families + size/weight scales, declared CSS-variable tokens, detected tech) follows the screenshots. The screenshots are JPEG-compressed and unreliable for exact color/type — so for "palette" you MUST use the ground-truth hex values verbatim (only assign role + pct), and for "fonts" you MUST use the ground-truth family names + their real size/weight scales. Do NOT invent colors or fonts that aren't in the ground truth. Use the screenshots only for layout, components, mood, and roles.
 
 Reminder: the 1-3 sentence prose MUST come first (it streams as live thinking). Then the JSON:
 {"usable":true,"assetType":"web-page","confidence":80,"title":"","description":"","theme":"","palette":[],"fonts":[],"components":[],"ia":[],"layoutNote":"","motion":[],"dos":[],"donts":[],"responsive":"","a11y":[],"tags":[],"warnings":[]}`
@@ -637,6 +729,8 @@ const SITE_REPLICA_USER =
 interface AnalyzeSitePage {
   name: string
   slices: string[]
+  /** Deterministic source-level facts harvested from this page's live DOM/CSS. */
+  source?: SourceFacts
 }
 
 interface AnalyzeSiteInput {
@@ -664,9 +758,41 @@ export async function analyzeSite(
     .flatMap((p) => (p.slices || []).slice(0, 2))
     .filter(Boolean)
     .slice(0, 8)
+
+  // Aggregate the deterministic source-level harvest across pages (entry page is
+  // canonical for palette/fonts; union tokens + tech across all pages). This is
+  // fed to the STYLE pass as authoritative ground truth.
+  const sources = input.pages.map((p) => p.source).filter(Boolean) as SourceFacts[]
+  const primary = sources[0]
+  const mergedTokens: Record<string, string> = {}
+  const fw = new Set<string>()
+  const cm = new Set<string>()
+  const il = new Set<string>()
+  for (const s of sources) {
+    Object.assign(mergedTokens, s.tokens)
+    s.tech.framework.forEach((x) => fw.add(x))
+    s.tech.cssMethod.forEach((x) => cm.add(x))
+    s.tech.iconLib.forEach((x) => il.add(x))
+  }
+  const tech = { framework: [...fw], cssMethod: [...cm], iconLib: [...il] }
+  const colorTokens = Object.fromEntries(
+    Object.entries(mergedTokens).filter(([, v]) => /#|rgb|hsl|oklch/.test(v))
+  )
+  const groundTruth = primary
+    ? '\n\nGROUND TRUTH (authoritative — extracted from the live page source; use these EXACT values for palette + fonts):\n' +
+      JSON.stringify({
+        palette: primary.palette.slice(0, 12).map((p) => p.hex),
+        fonts: primary.fonts.map((f) => ({ family: f.family, sizes: f.sizes, weights: f.weights })),
+        bodyFont: primary.bodyFont,
+        colorTokens: Object.fromEntries(Object.entries(colorTokens).slice(0, 40)),
+        tech
+      })
+    : ''
+  const styleUser = SITE_STYLE_USER + groundTruth
+
   const tokensP = onChunk
-    ? callModelStream(input.req, SITE_STYLE_SYSTEM, SITE_STYLE_USER, sample, onChunk)
-    : callModel(input.req, SITE_STYLE_SYSTEM, SITE_STYLE_USER, false, sample)
+    ? callModelStream(input.req, SITE_STYLE_SYSTEM, styleUser, sample, onChunk)
+    : callModel(input.req, SITE_STYLE_SYSTEM, styleUser, false, sample)
 
   const replicaP = Promise.all(
     input.pages.map(async (page) => {
@@ -688,9 +814,17 @@ export async function analyzeSite(
   )
 
   const [tokensText, replicaEntries] = await Promise.all([tokensP, replicaP])
-  const tokens = extractJson<Record<string, unknown>>(tokensText)
+  const parsed = extractJson<Record<string, unknown>>(tokensText)
   const perPageReplicas = Object.fromEntries(replicaEntries.filter(([, v]) => v))
-  return { ...tokens, perPageReplicas, stylePrompt: buildStylePrompt(tokens) }
+  // tech + tokens come straight from the deterministic harvest (the model never
+  // produces them), overriding anything it might have hallucinated.
+  return {
+    ...parsed,
+    perPageReplicas,
+    stylePrompt: buildStylePrompt(parsed),
+    tech,
+    tokens: mergedTokens
+  }
 }
 
 /* ============================================================

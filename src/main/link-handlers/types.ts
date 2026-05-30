@@ -60,10 +60,10 @@ export interface HandlerContext {
  *  handler will refuse to run (with a friendly "configure X in Settings"
  *  error). */
 export interface IntegrationsConfig {
-  twitter?: {
-    /** xapi.to base URL (e.g. https://xapi.to). */
-    baseURL: string
-    /** Bearer / x-api-key value the handler attaches to requests. */
+  xapi?: {
+    /** xapi-to API key (`sk-…`). Used as XAPI_API_KEY env when spawning
+     *  `npx xapi-to` from inside the Twitter handler (and any future
+     *  xapi-backed handler). */
     apiKey: string
   }
   // Future: xhs / instagram / pinterest / dribbble / behance / figma …

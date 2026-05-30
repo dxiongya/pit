@@ -1,0 +1,38 @@
+name: CI
+
+# Fast feedback on every push / PR to main: typecheck, lint, and a renderer/main
+# bundle build (no packaging). Native deps are rebuilt for Electron via the
+# package's postinstall (electron-builder install-app-deps).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Build (bundle only)
+        run: pnpm exec electron-vite build

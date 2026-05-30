@@ -1,5 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain, desktopCapturer } from 'electron'
-import { writeFileSync, mkdtempSync } from 'fs'
+import { exec } from 'child_process'
+import { promisify } from 'util'
+import { writeFileSync, mkdtempSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -15,6 +17,7 @@ import {
   type RoleRequest
 } from './ai'
 import { captureSite } from './capture'
+import { installMcp, uninstallMcp, testMcp, readMcpInstallStatus } from './mcp'
 import {
   listItems,
   upsertItem,
@@ -88,21 +91,88 @@ function createWindow(): void {
 }
 
 /**
- * IPC surface for pit.
+ * IPC surface for pit — all channels below are registered and live.
  *
- * Wired today:
- *  - pit:get-settings / pit:set-settings  → durable JSON in userData.
- *
- * Reserved seams (not yet registered, so the renderer falls back to mock data):
- *  - pit:capture-site   → render + screenshot each page (Playwright / offscreen window)
- *  - pit:analyze-site   → screenshots → DESIGN.md via the `design` role provider
- *  - pit:analyze-image  → image → design-content extraction
- * Register these here and expose them in preload to swap mock → real with no UI change.
+ * Settings:  pit:get-settings / pit:set-settings  → durable JSON in userData.
+ * Library:   pit:items:* / pit:collections:*       → SQLite (db.ts).
+ * AI:        pit:test-connection, pit:route, pit:suggest-collection-description,
+ *            pit:analyze-image(-stream), pit:capture-site, pit:analyze-site-stream,
+ *            pit:analyze-video(-stream)             → real provider calls (ai.ts).
+ * Pipelines: pit:derive:*, pit:share:*, pit:video:*, pit:capture:*, pit:rec:*,
+ *            pit:link:*, pit:mcp:*.
+ * Streaming responses are pushed back on a per-call channel pit:stream:<id> /
+ * pit:capture:<id>. The renderer's provider layer only falls back to mock data
+ * when a provider is unconfigured or a call errors — not as a steady state.
  */
 function registerIpc(): void {
-  ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('pit:get-settings', () => readSettings())
   ipcMain.handle('pit:set-settings', (_e, data) => writeSettings(data))
+
+  // MCP server discovery + install/uninstall/test. Powers the whole Settings
+  // → MCP card: build status, where the DB is, whether Claude Desktop already
+  // knows about us, and a smoke-test the user can run *before* restarting
+  // Claude Desktop. All filesystem effects are scoped to the Claude config
+  // dir; the rest are pure reads.
+  ipcMain.handle('pit:mcp:info', () => {
+    const dbPath = join(app.getPath('userData'), 'pit.db')
+    let dbExists = false
+    let dbSizeBytes = 0
+    try {
+      const st = statSync(dbPath)
+      dbExists = true
+      dbSizeBytes = st.size
+    } catch {
+      // ignored
+    }
+    let serverPath: string | null = null
+    let serverBuilt = false
+    const candidates = [
+      resolve(process.resourcesPath || '', 'app.asar.unpacked/infra/mcp-server/dist/server.js'),
+      resolve(app.getAppPath(), 'infra/mcp-server/dist/server.js'),
+      resolve(app.getAppPath(), '../infra/mcp-server/dist/server.js')
+    ]
+    for (const c of candidates) {
+      try {
+        if (statSync(c).isFile()) {
+          serverPath = c
+          serverBuilt = true
+          break
+        }
+      } catch {
+        // try next
+      }
+    }
+    if (!serverPath) {
+      serverPath = resolve(app.getAppPath(), '../infra/mcp-server')
+    }
+    const install = readMcpInstallStatus()
+    return {
+      dbPath,
+      dbExists,
+      dbSizeBytes,
+      serverPath,
+      serverBuilt,
+      // Claude Desktop integration status
+      configPath: install.configPath,
+      configExists: install.configExists,
+      installed: install.installed,
+      registeredArg: install.registeredArg,
+      otherServers: install.otherServers
+    }
+  })
+
+  // Toggle ON — write the Claude Desktop config (creating dir/file if needed)
+  // and return what changed so the UI can confirm "merged with N other
+  // servers". Backup of any prior config is kept beside it.
+  ipcMain.handle('pit:mcp:install', (_e, serverPath: string) => installMcp(serverPath))
+
+  // Toggle OFF — remove only our entry, leave everything else.
+  ipcMain.handle('pit:mcp:uninstall', () => uninstallMcp())
+
+  // Run an actual JSON-RPC smoke test against the built server. The UI
+  // shows a checklist (initialize / tools/list / search_items) — the user can
+  // see green checks *before* having to restart Claude Desktop.
+  ipcMain.handle('pit:mcp:test', (_e, serverPath: string) => testMcp(serverPath))
   ipcMain.handle('pit:test-connection', (_e, req) => testProvider(req))
   ipcMain.handle('pit:route', (_e, input) => routeItem(input))
   ipcMain.handle(
@@ -150,10 +220,15 @@ function registerIpc(): void {
   // pipeline based on the returned media counts.
   ipcMain.handle(
     'pit:link:extract',
-    (
-      _e,
-      input: { url: string; integrations?: { twitter?: { baseURL: string; apiKey: string } } }
-    ) => extractLink(input.url, { integrations: input.integrations })
+    (e, input: { id?: string; url: string; integrations?: { xapi?: { apiKey: string } } }) =>
+      extractLink(input.url, {
+        integrations: input.integrations,
+        // Relay handler progress back over the per-call channel (no-op if the
+        // renderer didn't supply an onProgress / id).
+        onProgress: input.id
+          ? (msg) => e.sender.send(`pit:link:progress:${input.id}`, msg)
+          : undefined
+      })
   )
   // Save a remote media URL (video typically) to a tmp file and return its
   // local path — the renderer hands that path to importVideo for keyframe
@@ -174,8 +249,17 @@ function registerIpc(): void {
     }
   )
 
-  // pit.ink share — POST to the share API, returns { code, url, hasPassword, expiresAt }.
-  ipcMain.handle('pit:share:create', (_e, input: ShareCreateInput) => createShare(input))
+  // Share — POST to the share API, returns { code, url, hasPassword, expiresAt }.
+  // The renderer passes its `settings.share` slice through as `override`; when
+  // empty we fall back to the free pit.ink service.
+  ipcMain.handle(
+    'pit:share:create',
+    (
+      _e,
+      input: ShareCreateInput,
+      override?: { workerUrl?: string; workerSecret?: string }
+    ) => createShare(input, override)
+  )
 
   // Derive — palette code-shift + AI naming. Pure code for the colors,
   // single AI call for the labels. Returns labelled variations the renderer
@@ -216,16 +300,29 @@ function registerIpc(): void {
   )
 
   // Inbound deep-link helpers — called by the renderer's ReceiveShareModal.
-  ipcMain.handle('pit:share:fetch', (_e, code: string) => fetchShare(code))
+  // override allows the renderer to point reads at a self-hosted Worker too
+  // (e.g. importing a share that one of your teammates created on the same
+  // self-hosted instance).
+  ipcMain.handle(
+    'pit:share:fetch',
+    (_e, code: string, override?: { workerUrl?: string; workerSecret?: string }) =>
+      fetchShare(code, override)
+  )
   ipcMain.handle(
     'pit:share:authenticate',
-    (_e, input: { code: string; password: string }) =>
-      authenticateShare(input.code, input.password)
+    (
+      _e,
+      input: { code: string; password: string },
+      override?: { workerUrl?: string; workerSecret?: string }
+    ) => authenticateShare(input.code, input.password, override)
   )
   ipcMain.handle(
     'pit:share:fetch-asset',
-    (_e, input: { code: string; asset: string }) =>
-      fetchAssetAsDataUrl(input.code, input.asset)
+    (
+      _e,
+      input: { code: string; asset: string },
+      override?: { workerUrl?: string; workerSecret?: string }
+    ) => fetchAssetAsDataUrl(input.code, input.asset, override)
   )
 
   // Screen recording — list capture sources (screens + windows) so the
@@ -255,13 +352,18 @@ function registerIpc(): void {
   // Toolbar tells main pit window to begin the recording session.
   ipcMain.on(
     'pit:rec:begin',
-    (_e, opts: {
+    async (_e, opts: {
       mode: 'screen' | 'window' | 'region'
       sourceId?: string
-      audio: boolean
       cropRect?: { x: number; y: number; w: number; h: number }
       sourceLabel?: string
     }) => {
+      // When the user picked a specific window, bring it to the front *before*
+      // we start MediaRecorder — otherwise they record a covered/minimized
+      // window and have to alt-tab manually.
+      if (opts.mode === 'window' && opts.sourceId) {
+        await bringWindowToFront(opts.sourceId)
+      }
       // CRITICAL — fire pit:rec:begin BEFORE spawning the float/border so
       // findMainWindow() can't accidentally pick an accessory window. Then
       // start the chrome (which spawns float + border).
@@ -357,19 +459,79 @@ function registerIpc(): void {
   // pit:// to a generic Electron in dev mode (not our instance), so we can't
   // easily fire the real flow without a production build install.
   if (is.dev) {
-    ipcMain.handle('pit:debug:fake-deep-link', (_e, code: string) => {
-      if (typeof code === 'string' && extractShareCode(`pit://share/${code}`)) {
+    ipcMain.handle('pit:debug:fake-deep-link', (_e, payload: string) => {
+      // Accept either a bare share code, a pit://share/<code>, or a
+      // pit://item/<id>. macOS dev protocol routing goes to a generic
+      // Electron (not our dev session) so this is how we exercise the flow
+      // end-to-end before shipping a packaged build.
+      if (typeof payload !== 'string') return { ok: false, error: 'bad_payload' }
+      const code = extractShareCode(payload) || extractShareCode(`pit://share/${payload}`)
+      if (code) {
         dispatchSharedCode(code)
-        return { ok: true }
+        return { ok: true, kind: 'share', code }
       }
-      return { ok: false, error: 'bad_code' }
+      const id = extractItemId(payload) || extractItemId(`pit://item/${payload}`)
+      if (id) {
+        dispatchItemId(id)
+        return { ok: true, kind: 'item', id }
+      }
+      return { ok: false, error: 'unknown_payload' }
     })
+  }
+}
+
+// ─── recording helpers ──────────────────────────────────────────────────
+
+const pexec = promisify(exec)
+
+/**
+ * Bring the OS window backing a `desktopCapturer` source ID to the front.
+ *
+ * Why: when the user picks "Window → Cursor" we don't want them to record a
+ * minimized / covered window. We translate the CGWindow id embedded in the
+ * source id (`window:CGID:0`) back to its owning process via Quartz, then
+ * activate that app. Best-effort and silent on failure — if we can't bring
+ * it forward, recording still works, the user just sees whatever was on top.
+ *
+ * macOS only. On other platforms this is a no-op (and we don't ship there
+ * yet anyway).
+ */
+async function bringWindowToFront(sourceId: string): Promise<void> {
+  if (process.platform !== 'darwin') return
+  const m = sourceId.match(/^window:(\d+):/)
+  if (!m) return
+  const cgId = m[1]
+  // JXA: look up the window by CGWindow id → owner PID → NSRunningApplication
+  // → activate. `kCGWindowListOptionIncludingWindow` filters to just our id.
+  const script = `
+    ObjC.import("AppKit");
+    ObjC.import("CoreGraphics");
+    var list = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionIncludingWindow, ${cgId});
+    var arr = ObjC.deepUnwrap(list);
+    if (arr && arr.length > 0) {
+      var pid = arr[0].kCGWindowOwnerPID;
+      var app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(pid);
+      if (app) app.activateWithOptions($.NSApplicationActivateIgnoringOtherApps);
+    }
+  `
+  try {
+    await pexec(`osascript -l JavaScript -e ${JSON.stringify(script)}`)
+    // Tiny pause to let the focus animation settle before MediaRecorder
+    // starts grabbing frames — otherwise the first ~100ms shows the
+    // previously-focused app.
+    await new Promise((r) => setTimeout(r, 180))
+  } catch {
+    // best-effort; ignore
   }
 }
 
 // ─── pit:// protocol handler ────────────────────────────────────────────
 
 const SHARE_URL_RE = /^pit:\/\/share\/([a-z0-9]{4,16})\/?$/i
+// Item deep links — emitted by the MCP server in tool responses so an LLM
+// can hand the user a clickable link that jumps straight to the item modal.
+// IDs are short kebab/uuid strings; accept up to 64 chars for future shapes.
+const ITEM_URL_RE = /^pit:\/\/item\/([\w-]{1,64})\/?$/i
 
 function extractShareCode(url: string | undefined | null): string | null {
   if (!url) return null
@@ -377,14 +539,26 @@ function extractShareCode(url: string | undefined | null): string | null {
   return m ? m[1].toLowerCase() : null
 }
 
-// Cold-start deep link (Windows/Linux: pit.exe pit://share/abc → argv).
+function extractItemId(url: string | undefined | null): string | null {
+  if (!url) return null
+  const m = url.match(ITEM_URL_RE)
+  return m ? m[1] : null
+}
+
+// Cold-start deep links (Windows/Linux: pit.exe pit://share/abc → argv).
 // macOS cold start fires via app.on('open-url') AFTER whenReady, so it's
 // captured by the regular handler.
 let pendingShareCode: string | null = null
+let pendingItemId: string | null = null
 for (const arg of process.argv) {
   const code = extractShareCode(arg)
   if (code) {
     pendingShareCode = code
+    break
+  }
+  const itemId = extractItemId(arg)
+  if (itemId) {
+    pendingItemId = itemId
     break
   }
 }
@@ -399,6 +573,37 @@ function dispatchSharedCode(code: string): void {
   if (win.isMinimized()) win.restore()
   win.focus()
   win.webContents.send('pit:share:received', { code })
+}
+
+/**
+ * Bring the main window to the front and tell the renderer to open the item
+ * detail overlay for `id`. Renderer is responsible for navigating into the
+ * item's collection — main doesn't know the collection map.
+ */
+function dispatchItemId(id: string): void {
+  const win = findMainWindow() || BrowserWindow.getAllWindows()[0]
+  if (!win) {
+    pendingItemId = id
+    return
+  }
+  if (win.isMinimized()) win.restore()
+  win.focus()
+  win.webContents.send('pit:item:open-requested', { id })
+}
+
+/** Try every known deep-link shape, fire the matching dispatcher. */
+function dispatchDeepLink(url: string): boolean {
+  const code = extractShareCode(url)
+  if (code) {
+    dispatchSharedCode(code)
+    return true
+  }
+  const itemId = extractItemId(url)
+  if (itemId) {
+    dispatchItemId(itemId)
+    return true
+  }
+  return false
 }
 
 function registerProtocolHandler(): void {
@@ -429,11 +634,7 @@ if (!app.requestSingleInstanceLock()) {
       win.focus()
     }
     for (const arg of argv) {
-      const code = extractShareCode(arg)
-      if (code) {
-        dispatchSharedCode(code)
-        break
-      }
+      if (dispatchDeepLink(arg)) break
     }
   })
 }
@@ -442,8 +643,7 @@ if (!app.requestSingleInstanceLock()) {
 // required for Electron to skip its default "open new instance" handling.
 app.on('open-url', (e, url) => {
   e.preventDefault()
-  const code = extractShareCode(url)
-  if (code) dispatchSharedCode(code)
+  dispatchDeepLink(url)
 })
 
 app.whenReady().then(() => {
@@ -457,11 +657,15 @@ app.whenReady().then(() => {
   // Drain any deep-link code captured at cold start (argv) or before the
   // first window existed (macOS open-url firing during whenReady).
   const win = BrowserWindow.getAllWindows()[0]
-  if (win && pendingShareCode) {
+  if (win && (pendingShareCode || pendingItemId)) {
     win.webContents.once('did-finish-load', () => {
       if (pendingShareCode) {
         win.webContents.send('pit:share:received', { code: pendingShareCode })
         pendingShareCode = null
+      }
+      if (pendingItemId) {
+        win.webContents.send('pit:item:open-requested', { id: pendingItemId })
+        pendingItemId = null
       }
     })
   }

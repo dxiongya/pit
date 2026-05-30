@@ -39,7 +39,7 @@ export function RecordingSession(): React.JSX.Element | null {
       labelRef.current = opts.sourceLabel || 'Recording'
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: opts.audio,
+          audio: false,
           video: {
             // @ts-expect-error — Electron-only constraints
             mandatory: {

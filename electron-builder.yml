@@ -1,4 +1,4 @@
-appId: com.electron.app
+appId: com.pit.app
 productName: pit
 directories:
   buildResources: build
@@ -22,6 +22,12 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  # dmg (drag-to-install) + zip (the format electron-updater consumes on mac).
+  # Arch defaults to the build host's — native deps (better-sqlite3) are only
+  # rebuilt per-host, so cross-arch/universal needs extra CI setup (see below).
+  target:
+    - dmg
+    - zip
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -39,15 +45,17 @@ protocols:
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
+  # AppImage (runs anywhere) + deb. snap is dropped: building it in CI needs
+  # snapcraft/LXD and routinely fails on plain GitHub runners.
   target:
     - AppImage
-    - snap
     - deb
-  maintainer: electronjs.org
+  maintainer: dxiongya
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: dxiongya
+  repo: pit

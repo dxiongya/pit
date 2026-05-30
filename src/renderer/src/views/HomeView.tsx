@@ -63,11 +63,8 @@ export function HomeView({
           </div>
         </div>
         <div className="hero-actions">
-          <Button onClick={onImport}>
+          <Button variant="primary" onClick={onImport}>
             <I.Link size={15} /> Press ⌘V to paste
-          </Button>
-          <Button variant="primary">
-            <I.Sparkles size={15} /> Surface something
           </Button>
         </div>
       </div>
@@ -86,13 +83,6 @@ export function HomeView({
             </span>
           </button>
         ))}
-        <div style={{ flex: 1 }} />
-        <button className="chip">
-          <I.Filter size={12} /> Filter
-        </button>
-        <button className="chip">
-          <I.Grid size={12} />
-        </button>
       </div>
 
       <Masonry items={filtered} onOpenItem={onOpenItem} />

@@ -11,7 +11,7 @@
 // tab that surfaces the video-specific fields (sequence / transitions /
 // motionVerbs) written by analyzeVideo.
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { DesignDoc, Item } from '../../lib/types'
 import { I } from '../../lib/icons'
@@ -60,9 +60,22 @@ export function VideoDetail({
   // to the clicked one when the cursor leaves the strip.
   const [hoverFrame, setHoverFrame] = useState<number | null>(null)
   const [lightbox, setLightbox] = useState(false)
-  const stripRef = useRef<HTMLDivElement>(null)
 
   const doc = item.design
+  const frames = doc?.pages || []
+
+  // Auto-cycle frames when "play" is on. Pauses if the user starts scrubbing.
+  // Declared BEFORE the early return below so every hook runs unconditionally
+  // (rules-of-hooks); it self-guards on frames.length, so it's a no-op when
+  // there's no analysis yet.
+  useEffect(() => {
+    if (!playing || frames.length < 2) return
+    const interval = setInterval(() => {
+      setFrame((f) => (f + 1) % frames.length)
+    }, 1000 / PLAYBACK_FPS)
+    return () => clearInterval(interval)
+  }, [playing, frames.length])
+
   if (!doc) {
     return (
       <div className="detail-stage" style={{ display: 'grid', placeItems: 'center', padding: 40 }}>
@@ -74,7 +87,6 @@ export function VideoDetail({
     )
   }
 
-  const frames = doc.pages || []
   const showFrame = hoverFrame ?? frame
   const current = frames[showFrame] || frames[0]
   // Multi-page image items reuse this component but call them "images" and
@@ -83,23 +95,22 @@ export function VideoDetail({
   const unitWord = isGroup ? 'image' : 'frame'
   const unitWordCap = isGroup ? 'Image' : 'Frame'
 
-  // Auto-cycle frames when "play" is on. Pauses if the user starts scrubbing.
-  useEffect(() => {
-    if (!playing || frames.length < 2) return
-    const interval = setInterval(() => {
-      setFrame((f) => (f + 1) % frames.length)
-    }, 1000 / PLAYBACK_FPS)
-    return () => clearInterval(interval)
-  }, [playing, frames.length])
-
   // Hover scrub — map mouse X across the strip to a frame index.
   const onStripMove = (e: React.MouseEvent<HTMLDivElement>): void => {
-    if (!stripRef.current || frames.length === 0) return
-    const rect = stripRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const t = Math.max(0, Math.min(1, x / rect.width))
-    const idx = Math.min(frames.length - 1, Math.floor(t * frames.length))
-    setHoverFrame(idx)
+    // Hit-test the actual thumb elements. The previous proportional math
+    // (`x / rect.width * frames.length`) ignored strip padding, inter-thumb
+    // gaps, and overflow scroll — and once a frame got highlighted, the
+    // border reflowed the strip 1–2px, so the cursor immediately landed on a
+    // different "logical" frame and started thrashing. elementFromPoint
+    // gives us the truth: whichever thumb is under the pointer right now.
+    if (frames.length === 0) return
+    const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+    const thumb = el?.closest('[data-frame-idx]') as HTMLElement | null
+    if (!thumb) return
+    const idx = parseInt(thumb.dataset.frameIdx || '', 10)
+    if (Number.isFinite(idx) && idx >= 0 && idx < frames.length && idx !== hoverFrame) {
+      setHoverFrame(idx)
+    }
   }
   const onStripLeave = (): void => setHoverFrame(null)
 
@@ -116,9 +127,9 @@ export function VideoDetail({
             type="button"
             className="stage-expand"
             onClick={() => setLightbox(true)}
-            title="Expand current frame (zoom + pan)"
+            title="Open large preview (zoom + pan)"
           >
-            <I.Eye size={14} />
+            <I.Zoom size={14} />
           </button>
         )}
         <div className="detail-stage-head">
@@ -167,7 +178,8 @@ export function VideoDetail({
               <img
                 src={current.screenshot}
                 alt={current.name}
-                style={{ display: 'block', width: '100%' }}
+                onClick={() => setLightbox(true)}
+                style={{ display: 'block', width: '100%', cursor: 'zoom-in' }}
               />
             ) : (
               <div style={{ width: '100%', aspectRatio: 16 / 9, background: 'var(--bg-soft)' }} />
@@ -194,13 +206,12 @@ export function VideoDetail({
 
         {/* frame strip with click-to-select + hover-to-scrub */}
         <div
-          ref={stripRef}
           onMouseMove={onStripMove}
           onMouseLeave={onStripLeave}
-          className="no-scrollbar"
+          className="no-scrollbar page-strip"
           style={{
             display: 'flex',
-            gap: 6,
+            gap: 8,
             padding: '10px 18px 14px',
             borderTop: '1px solid var(--hair)',
             overflowX: 'auto'
@@ -209,31 +220,32 @@ export function VideoDetail({
           {frames.map((p, i) => {
             const isLive = i === showFrame
             const isSticky = i === frame
+            // Two distinct highlights without changing layout: the live
+            // (hover-scrub) frame gets the accent outline + a tiny lift, the
+            // committed (sticky) frame gets a neutral outline ring.
+            const klass =
+              'page-thumb' +
+              (isLive ? ' active' : '') +
+              (isSticky && !isLive ? ' sticky' : '')
             return (
-              <div
+              <button
                 key={p.name + i}
+                type="button"
+                data-frame-idx={i}
                 onClick={() => {
                   setFrame(i)
                   setPlaying(false)
                 }}
+                className={klass}
                 style={{
-                  width: 64,
-                  height: 44,
-                  borderRadius: 6,
                   background: p.screenshot
                     ? `center/cover url(${p.screenshot})`
                     : 'var(--bg-soft)',
-                  border: isLive
-                    ? '2px solid var(--accent)'
-                    : isSticky
-                      ? '2px solid var(--ink)'
-                      : '1px solid var(--hair)',
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                  transition: 'transform 0.08s ease',
                   transform: isLive ? 'translateY(-2px)' : 'none'
                 }}
                 title={p.name}
+                aria-label={`Frame ${i + 1}: ${p.name}`}
+                aria-pressed={isSticky}
               />
             )
           })}

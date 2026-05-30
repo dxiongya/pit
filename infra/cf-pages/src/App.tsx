@@ -46,7 +46,7 @@ function NotFound(): React.JSX.Element {
     <div className="centered">
       <PitLogo size={48} />
       <div className="page-heading">Not found</div>
-      <div className="muted">This URL doesn't match any share.</div>
+      <div className="muted">This URL doesn’t match any share.</div>
       <a className="link-btn" href="/">
         Back to pit.ink
       </a>

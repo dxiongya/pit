@@ -6,10 +6,12 @@
 // render server-side.
 
 import { BrowserWindow, net } from 'electron'
+import { assertPublicHttpUrl } from '../net-guard'
 
 /** Download a remote URL to a data: URL. Uses Electron's `net` so cookies
  *  / proxy / TLS verification all match the app. */
 export async function downloadToDataUrl(url: string): Promise<string> {
+  await assertPublicHttpUrl(url) // SSRF guard — url is renderer-supplied
   return new Promise((resolve, reject) => {
     const req = net.request(url)
     req.on('response', (res) => {
@@ -55,6 +57,7 @@ export interface RenderOpts {
 }
 
 export async function renderAndExtract<T>(opts: RenderOpts): Promise<T> {
+  await assertPublicHttpUrl(opts.url) // SSRF guard — opts.url is renderer-supplied
   const win = new BrowserWindow({
     width: 1280,
     height: 1600,
@@ -72,9 +75,32 @@ export async function renderAndExtract<T>(opts: RenderOpts): Promise<T> {
   try {
     if (opts.userAgent) win.webContents.setUserAgent(opts.userAgent)
 
+    // SPA share pages (Xiaohongshu, Weibo, WeChat, …) try to bounce into their
+    // NATIVE app via a custom-scheme redirect (xhsdiscover://, weixin://, …).
+    // Navigating a hidden window to an unhandled scheme aborts the in-flight
+    // load (ERR_ABORTED) — which would reject loadURL even though the H5 page
+    // we actually want already rendered. Block every non-http(s) navigation so
+    // the page stays put and stays scrapeable. Pop-ups are denied outright.
+    const blockNonHttp = (e: Electron.Event, navUrl: string): void => {
+      if (!/^https?:/i.test(navUrl)) e.preventDefault()
+    }
+    win.webContents.on('will-navigate', blockNonHttp)
+    win.webContents.on('will-redirect', blockNonHttp)
+    win.webContents.setWindowOpenHandler(({ url }) =>
+      /^https?:/i.test(url) ? { action: 'allow' } : { action: 'deny' }
+    )
+
     // Race the load + extraction against the hard timeout.
     const done = (async (): Promise<T> => {
-      await win.loadURL(opts.url)
+      try {
+        await win.loadURL(opts.url)
+      } catch (e) {
+        // An app-launch redirect can still abort the load after the H5 content
+        // painted. Tolerate ERR_ABORTED and try to extract anyway; re-throw any
+        // genuine failure (DNS, connection refused, cert error, …).
+        const msg = String((e as Error).message || '')
+        if (!/ERR_ABORTED|\(-3\)/.test(msg)) throw e
+      }
       if (opts.waitForSelector) {
         await waitForSelector(win, opts.waitForSelector, timeout)
       }
@@ -115,16 +141,25 @@ async function waitForSelector(
   throw new Error(`selector "${selector}" never appeared`)
 }
 
-/** Resolve a URL through any redirects without fetching the body — useful
- *  for short-link unwrap (xhslink.com → xiaohongshu.com/...). */
+/** Resolve a short link one hop to its canonical URL. Uses GET (not HEAD) with
+ *  redirect:'manual' — some shorteners (e.g. xhslink.com) 404 on HEAD but 302 on
+ *  GET. The body is drained and discarded; we only want the Location header. */
 export async function resolveRedirect(url: string): Promise<string> {
+  await assertPublicHttpUrl(url) // SSRF guard — url is renderer-supplied
   return new Promise((resolve) => {
-    const req = net.request({ method: 'HEAD', url, redirect: 'manual' })
+    const req = net.request({ method: 'GET', url, redirect: 'manual' })
     req.on('response', (res) => {
       const loc = res.headers['location']
+      res.on('data', () => {}) // drain so the socket can close
+      res.on('end', () => {})
       if (loc && res.statusCode >= 300 && res.statusCode < 400) {
         const next = Array.isArray(loc) ? loc[0] : loc
-        resolve(next)
+        // Re-validate the unwrapped target before handing it back to a fetcher;
+        // a short-link must not be allowed to point at an internal address.
+        assertPublicHttpUrl(next).then(
+          () => resolve(next),
+          () => resolve(url)
+        )
       } else {
         resolve(url)
       }

@@ -2,6 +2,9 @@
 // Aligned with the DESIGN.md spec (VoltAgent/awesome-design-md) for site analysis,
 // plus the collection / routing / settings models for the 5 product surfaces.
 
+import type { SourceFacts } from '../../../shared/ipc'
+export type { SourceFacts }
+
 export type ItemKind = 'image' | 'link' | 'video' | 'palette' | 'font' | 'quote' | 'note'
 
 export type View = 'home' | 'collection' | 'new-collection' | 'settings' // AI config
@@ -59,6 +62,10 @@ export interface Item {
   createdAt?: number
   // background import lifecycle (paste-to-import). `ready` once analysis lands.
   status?: 'analyzing' | 'ready' | 'failed'
+  /** Provenance of the analysis: 'real' = a live provider produced it, 'mock' =
+   *  sample fallback (provider unconfigured or the call errored). Lets the UI
+   *  flag sample-data items so they don't masquerade as real analysis. */
+  analysisSource?: 'real' | 'mock'
   progress?: string // human-readable step, e.g. "Capturing 2/4…"
   streamText?: string // live "thinking" stream, shown in the analyzing popup
   /** Pages already captured during a live link import — drives the per-page
@@ -114,6 +121,8 @@ export interface CapturedPage {
   /** Video-only: 1-2 sentence caption of what's happening at this keyframe. */
   motionDescription?: string
   bg?: string
+  /** Source-level design facts harvested from this page's live DOM/CSS. */
+  source?: SourceFacts
 }
 
 export interface PaletteRole {
@@ -230,6 +239,12 @@ export interface DesignDoc {
   agentPrompt?: string
   a11y: A11yCheck[]
   tags: string[]
+  /** Source-harvested tech stack (framework / CSS method / icon lib) — real
+   *  detection from the live DOM, not a guess from screenshots. */
+  tech?: { framework: string[]; cssMethod: string[]; iconLib: string[] }
+  /** Source-harvested CSS custom-property design tokens (name → value), when the
+   *  site exposes them as :root variables. Empty for CSS-in-JS sites. */
+  tokens?: Record<string, string>
 }
 
 /* ============================================================
@@ -312,17 +327,31 @@ export interface AISettings {
 }
 
 /**
- * Third-party integrations — credentials for source-specific link handlers
- * (Twitter via xapi.to, future Instagram/Pinterest/etc.). Distinct from
- * AISettings because they're not AI providers but data gateways.
+ * Third-party integrations — credentials for source-specific link handlers.
+ * xapi is the data gateway pit shells out to for Twitter and (later) other
+ * platforms that ship via xapi (Reddit, YouTube, X API v2, Serper, …).
  */
 export interface IntegrationsSettings {
-  twitter?: {
-    /** xapi.to base URL (e.g. https://xapi.to). */
-    baseURL: string
-    /** Bearer / x-api-key value passed by the handler. */
+  xapi?: {
+    /** xapi-to API key (`sk-…`). Stored at runtime by exporting
+     *  `XAPI_API_KEY` when we spawn the `npx xapi-to call` subprocess. */
     apiKey: string
   }
+}
+
+/**
+ * Sharing backend config. By default pit talks to the free pit.ink Worker
+ * (50 MB cap, 1 h auto-expiry). Power users can stand up their own
+ * Cloudflare Worker (see infra/cf-worker) and paste its URL + optional
+ * shared secret here for unlimited size + custom expiry.
+ */
+export interface ShareSettings {
+  /** Custom Worker origin, e.g. `https://pit-share.acme.workers.dev`. Blank
+   *  → falls back to the free pit.ink service. */
+  workerUrl?: string
+  /** Optional bearer token sent as `Authorization: Bearer <secret>`. Use it
+   *  if your self-hosted Worker enforces SHARE_AUTH_SECRET. */
+  workerSecret?: string
 }
 
 export interface AppSettings {
@@ -335,4 +364,7 @@ export interface AppSettings {
   /** Per-handler third-party API creds. Optional — handlers that need a
    *  slice but don't find it throw a "configure in Settings" error. */
   integrations?: IntegrationsSettings
+  /** Self-hosted share Worker overrides. Optional — empty means use the
+   *  free pit.ink service. */
+  share?: ShareSettings
 }

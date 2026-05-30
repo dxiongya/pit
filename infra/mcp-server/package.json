@@ -1,0 +1,26 @@
+{
+  "name": "pit-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Model Context Protocol server that exposes a pit knowledge base (collected design references) as tools an LLM can call. Read-only access to the local pit.db; results carry pit://item/<id> deep links so the LLM can hand the user a clickable jump-into-app link.",
+  "type": "module",
+  "bin": {
+    "pit-mcp-server": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^11.3.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.7.4",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

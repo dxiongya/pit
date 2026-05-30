@@ -1,6 +1,7 @@
 // RecorderToolbar — the bottom-of-screen picker that replaces the in-app
 // modal. Modelled on CleanShot X / Loom toolbars: a dark pill with mode
-// icons (Display / Window / Area) + mic toggle + Start button + close.
+// icons (Display / Window / Area) + Start button + close. We record demos
+// only — no audio capture, so there's no mic toggle.
 //
 // The toolbar lives in its own BrowserWindow (#/recorder-toolbar). It's the
 // only UI shown to the user until they click Start; at that point the
@@ -15,7 +16,6 @@ type Source = { id: string; name: string; thumbnail: string; kind: 'screen' | 'w
 
 export function RecorderToolbar(): React.JSX.Element {
   const [mode, setMode] = useState<Mode>('display')
-  const [audio, setAudio] = useState(false)
   const [sources, setSources] = useState<Source[]>([])
   const [chosenSourceId, setChosenSourceId] = useState<string | null>(null)
   const [areaRect, setAreaRect] = useState<{
@@ -123,7 +123,6 @@ export function RecorderToolbar(): React.JSX.Element {
     window.pit.rec.begin({
       mode: mode === 'display' ? 'screen' : mode === 'window' ? 'window' : 'region',
       sourceId,
-      audio,
       cropRect,
       sourceLabel: chosenLabel || undefined
     })
@@ -168,19 +167,6 @@ export function RecorderToolbar(): React.JSX.Element {
           }}
         />
       </div>
-
-      <div className="rec-tb-sep" />
-
-      <button
-        type="button"
-        className={`rec-tb-toggle icon-only${audio ? ' on' : ''}`}
-        onClick={() => setAudio((v) => !v)}
-        title={audio ? 'Microphone on — click to disable' : 'Microphone off — click to enable'}
-      >
-        {audio ? <MicIcon /> : <MicOffIcon />}
-      </button>
-
-      <div className="rec-tb-sep" />
 
       <div className="rec-tb-spacer" />
 
@@ -308,36 +294,6 @@ function AreaIcon(): React.JSX.Element {
         strokeLinecap="round"
         strokeDasharray="2 2"
       />
-    </svg>
-  )
-}
-function MicIcon(): React.JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
-      <rect x="6" y="2" width="4" height="8" rx="2" fill="currentColor" />
-      <path
-        d="M4 8 V8.5 C4 10.7 5.8 12.5 8 12.5 C10.2 12.5 12 10.7 12 8.5 V8 M8 12.5 V14"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        fill="none"
-      />
-    </svg>
-  )
-}
-function MicOffIcon(): React.JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
-      <rect x="6" y="2" width="4" height="8" rx="2" fill="currentColor" opacity="0.5" />
-      <path
-        d="M4 8 V8.5 C4 10.7 5.8 12.5 8 12.5 C10.2 12.5 12 10.7 12 8.5 V8 M8 12.5 V14"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        fill="none"
-        opacity="0.5"
-      />
-      <path d="M2 14 L14 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   )
 }

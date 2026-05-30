@@ -10,10 +10,23 @@ function settingsPath(): string {
 }
 
 export async function readSettings(): Promise<Record<string, unknown> | null> {
+  let raw: string
   try {
-    const raw = await readFile(settingsPath(), 'utf-8')
-    return JSON.parse(raw)
+    raw = await readFile(settingsPath(), 'utf-8')
   } catch {
+    return null // no file yet — first run; callers fall back to defaults
+  }
+  try {
+    return JSON.parse(raw)
+  } catch (e) {
+    // Corrupt settings: don't silently reset to defaults (that throws away the
+    // user's provider config). Preserve the bad file for recovery and log loudly.
+    console.error('[settings] pit-settings.json is corrupt — ignoring:', e)
+    try {
+      await writeFile(settingsPath() + '.corrupt', raw, 'utf-8')
+    } catch {
+      /* best-effort backup */
+    }
     return null
   }
 }

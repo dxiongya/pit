@@ -15,6 +15,26 @@ import { ShareModal, type ShareTarget } from './views/detail/ShareModal'
 import { ReceiveShareModal } from './views/detail/ReceiveShareModal'
 import { RecordingSession } from './views/detail/RecordingSession'
 import { GroupImportModal } from './views/detail/GroupImportModal'
+import { WelcomeGuide } from './views/detail/WelcomeGuide'
+import { CommandPalette, type PaletteAction } from './components/CommandPalette'
+
+/**
+ * Pull an importable link out of pasted clipboard text.
+ *  - A bare URL / domain (no surrounding whitespace) is returned as-is, so
+ *    plain "example.com" still works.
+ *  - Otherwise we extract the first explicit http(s) URL embedded in a larger
+ *    blob — e.g. a Xiaohongshu / X share message that wraps the link in a
+ *    title + caption + "Copy and open …" boilerplate. Stops at whitespace and
+ *    common CJK/ASCII punctuation, then trims trailing sentence punctuation.
+ */
+function firstUrlInText(raw: string): string | null {
+  const t = raw.trim()
+  if (!t) return null
+  if (!/\s/.test(t) && /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}/i.test(t)) return t
+  const m = t.match(/https?:\/\/[^\s"'<>）)】，。、！？]+/i)
+  if (!m) return null
+  return m[0].replace(/[.,;!?]+$/, '')
+}
 
 function Shell(): React.JSX.Element {
   const {
@@ -34,6 +54,12 @@ function Shell(): React.JSX.Element {
   // Set by `pit://share/<code>` deep links delivered to the main process.
   const [incomingShareCode, setIncomingShareCode] = useState<string | null>(null)
   const [groupImportOpen, setGroupImportOpen] = useState(false)
+  // First-run onboarding. Auto-opens once; re-openable from the TopBar "?".
+  const [guideOpen, setGuideOpen] = useState(false)
+  // ⌘K / click-on-search palette. Lives at App level so we can drive the
+  // navigate() + setOpenItemId callbacks directly when the user picks a hit.
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [paletteQuery, setPaletteQuery] = useState('')
   // null = creating a new collection; set = editing the one with this id
   const [editingCollectionId, setEditingCollectionId] = useState<string | null>(null)
   const editingCollection = editingCollectionId
@@ -49,11 +75,59 @@ function Shell(): React.JSX.Element {
     if (id != null) setCollectionId(id)
   }
 
+  // Show the welcome tour on first launch only (flag persisted in localStorage).
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem('pit:onboarded')) setGuideOpen(true)
+    } catch {
+      /* localStorage unavailable — skip the tour rather than block startup */
+    }
+  }, [])
+  const closeGuide = (): void => {
+    try {
+      localStorage.setItem('pit:onboarded', '1')
+    } catch {
+      /* ignore */
+    }
+    setGuideOpen(false)
+  }
+
   // Subscribe to pit:// deep links — the main process pushes a {code} whenever
   // the OS hands us a share URL (cold-start argv, macOS open-url, or a second
   // instance bringing the URL to the running one).
   useEffect(() => {
     return window.pit.share.onReceived(({ code }) => setIncomingShareCode(code))
+  }, [])
+
+  // `pit://item/<id>` — typically emitted by the MCP server in tool responses
+  // so an LLM can hand the user a link that jumps right to the item. We look
+  // the item up from the store, navigate into its collection (so the
+  // breadcrumb / sidebar are in the right context), then open the detail
+  // overlay. Best-effort: if the id is unknown we toast a friendly miss.
+  useEffect(() => {
+    return window.pit.onOpenItem(({ id }) => {
+      const it = items.find((x) => x.id === id)
+      if (!it) {
+        toast.push(`Item not found: ${id.slice(0, 8)}…`)
+        return
+      }
+      navigate('collection', it.collection)
+      setOpenItemId(it.id)
+    })
+  }, [items, toast])
+
+  // Global ⌘K / Ctrl+K → command palette. The shortcut also works while a
+  // text field is focused so users can pop search out of any context.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteQuery('')
+        setPaletteOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   // Paste-to-import: anywhere outside a text field, detect a URL vs an image on
@@ -68,9 +142,7 @@ function Shell(): React.JSX.Element {
       const imgItems = Array.from(dt.items).filter((i) => i.type.startsWith('image/'))
       if (imgItems.length > 0) {
         e.preventDefault()
-        const files = imgItems
-          .map((i) => i.getAsFile())
-          .filter((f): f is File => f != null)
+        const files = imgItems.map((i) => i.getAsFile()).filter((f): f is File => f != null)
         for (const f of files) {
           const reader = new FileReader()
           reader.onload = (): void => importImage(reader.result as string)
@@ -83,10 +155,10 @@ function Shell(): React.JSX.Element {
         )
         return
       }
-      const text = dt.getData('text/plain').trim()
-      if (text && !/\s/.test(text) && /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}/i.test(text)) {
+      const url = firstUrlInText(dt.getData('text/plain'))
+      if (url) {
         e.preventDefault()
-        importLink(text)
+        importLink(url)
         toast.push('Importing link…')
       }
     }
@@ -99,8 +171,9 @@ function Shell(): React.JSX.Element {
   // smoke tests. Stripped from production by `if (import.meta.env.DEV)`.
   useEffect(() => {
     if (import.meta.env.DEV) {
-      ;(window as unknown as { __pitImportVideo?: (path: string, name?: string) => void }).__pitImportVideo =
-        importVideo
+      ;(
+        window as unknown as { __pitImportVideo?: (path: string, name?: string) => void }
+      ).__pitImportVideo = importVideo
     }
   }, [importVideo])
 
@@ -171,10 +244,18 @@ function Shell(): React.JSX.Element {
       // No image files — look for URL text (uri-list first, then plain text).
       const raw = (dt.getData('text/uri-list') || dt.getData('text/plain') || '').trim()
       if (!raw) return
-      const urls = raw
-        .split(/\s+/)
-        .map((s) => s.trim())
-        .filter((s) => /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}/i.test(s))
+      // Prefer explicit http(s) URLs anywhere in the text — this handles share
+      // blobs (Xiaohongshu / X) that wrap the link in caption boilerplate. Only
+      // when none are present do we fall back to bare-domain whitespace tokens.
+      const explicit = (raw.match(/https?:\/\/[^\s"'<>）)】，。、！？]+/gi) || []).map((u) =>
+        u.replace(/[.,;!?]+$/, '')
+      )
+      const urls = explicit.length
+        ? explicit
+        : raw
+            .split(/\s+/)
+            .map((s) => s.trim())
+            .filter((s) => /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}/i.test(s))
       if (urls.length) {
         e.preventDefault()
         for (const u of urls) importLink(u)
@@ -255,6 +336,11 @@ function Shell(): React.JSX.Element {
           openRecord={() => void window.pit.rec.openToolbar()}
           openGroup={() => setGroupImportOpen(true)}
           openSettings={() => navigate('settings')}
+          openGuide={() => setGuideOpen(true)}
+          openSearch={() => {
+            setPaletteQuery('')
+            setPaletteOpen(true)
+          }}
         />
 
         {view === 'home' && (
@@ -310,9 +396,16 @@ function Shell(): React.JSX.Element {
           onShare={() => setShareTarget({ kind: 'item', item: openItem })}
         />
       )}
-      {shareTarget && (
-        <ShareModal target={shareTarget} onClose={() => setShareTarget(null)} />
+      {guideOpen && (
+        <WelcomeGuide
+          onClose={closeGuide}
+          onOpenSettings={() => {
+            closeGuide()
+            navigate('settings')
+          }}
+        />
       )}
+      {shareTarget && <ShareModal target={shareTarget} onClose={() => setShareTarget(null)} />}
       {incomingShareCode && (
         <ReceiveShareModal
           code={incomingShareCode}
@@ -327,17 +420,39 @@ function Shell(): React.JSX.Element {
           the MediaRecorder lifecycle for that session. No UI of its own. */}
       <RecordingSession />
       {groupImportOpen && <GroupImportModal onClose={() => setGroupImportOpen(false)} />}
+      <CommandPalette
+        open={paletteOpen}
+        query={paletteQuery}
+        setQuery={setPaletteQuery}
+        items={items}
+        collections={collections}
+        view={view}
+        onClose={() => setPaletteOpen(false)}
+        onPick={(a: PaletteAction) => {
+          setPaletteOpen(false)
+          if (a.kind === 'item') {
+            // For items: navigate into the owning collection so the breadcrumb
+            // + sidebar reflect the right context, then open the detail overlay.
+            navigate('collection', a.collection)
+            setOpenItemId(a.id)
+          } else {
+            navigate('collection', a.id)
+          }
+        }}
+      />
     </div>
   )
 }
 
 function App(): React.JSX.Element {
+  // ToastHost wraps StoreProvider so the store can surface persistence failures
+  // (a failed SQLite write would otherwise vanish, leaving the UI out of sync).
   return (
-    <StoreProvider>
-      <ToastHost>
+    <ToastHost>
+      <StoreProvider>
         <Shell />
-      </ToastHost>
-    </StoreProvider>
+      </StoreProvider>
+    </ToastHost>
   )
 }
 

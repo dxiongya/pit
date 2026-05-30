@@ -3,9 +3,10 @@
 // Providers are user-created instances (any number, any kind). Each functional
 // role (`design`, `routing`) binds to a provider instance + one of its models,
 // and roles may use different providers. This file resolves a role to a concrete
-// request and is the single seam to the main process (`window.pit`). Capture /
-// analyze fall back to mock until the main process implements them; testConnection
-// is wired to a real check.
+// request and is the single seam to the main process (`window.pit`). Capture,
+// analyze, routing and testConnection are all wired to real main-process IPC;
+// the mock DesignDoc / offline routing heuristic only kick in when a provider is
+// unconfigured or a call throws (e.g. the bridge isn't reloaded), not by default.
 
 import type {
   AIRole,
@@ -21,6 +22,10 @@ import type {
 import { LINK_DESIGN_DOC } from '../mockData'
 import type { Modality, ModelModality } from '../catalog/types'
 import { lookupModel } from '../catalog/lookup'
+// Canonical IPC contract types (shared with preload + main). Re-exported below
+// so existing consumers of these names from this module keep working.
+import type { RoleRequest, RouteInput, RoutingResult, CapturedPage } from '../../../../shared/ipc'
+export type { RoleRequest, RoutingResult, CapturedPage }
 
 /** Per-kind metadata: how it's called, defaults, and UI hints. */
 export const KIND_META: Record<
@@ -249,14 +254,6 @@ export function draftMatchScore(
    ============================================================ */
 
 /** Concrete request the main process needs to call a provider. */
-export interface RoleRequest {
-  kind: ProviderKind
-  name: string
-  model: string
-  apiKey: string
-  baseURL?: string
-}
-
 export function providerRequest(provider: Provider, model: string): RoleRequest {
   return {
     kind: provider.kind,
@@ -265,26 +262,6 @@ export function providerRequest(provider: Provider, model: string): RoleRequest 
     apiKey: provider.apiKey,
     baseURL: provider.baseURL
   }
-}
-
-export interface RoutingResult {
-  suggestions: { collectionId: string; confidence: number; reason: string }[]
-  best: string
-}
-
-interface RouteInput {
-  req: RoleRequest
-  item: { title?: string; description?: string; tags?: string[] }
-  collections: { id: string; name: string; prompt?: string; tags?: string[]; skip?: string[] }[]
-  threshold: number
-}
-
-export interface CapturedPage {
-  name: string
-  url: string
-  screenshot?: string
-  slices?: string[]
-  error?: string
 }
 
 interface PitBridge {
@@ -422,6 +399,58 @@ const EMPTY_DOC: Pick<
 }
 
 /**
+ * Fields the AI sometimes returns as an object instead of a string (e.g.
+ * `responsive: { breakpoints, touch, collapse }` when the prompt schema lists
+ * sub-aspects). Coerce them to strings at the boundary so the renderer can
+ * trust the shape and a stale model can't crash the detail view.
+ *
+ * Strings are kept verbatim; arrays + objects get flattened into readable
+ * `key: value` lines (no analysis is lost — just laid out differently).
+ */
+const TEXT_FIELDS = [
+  'title',
+  'theme',
+  'description',
+  'responsive',
+  'layoutNote',
+  'composition',
+  'stylePrompt',
+  'agentPrompt',
+  'replicaPrompt',
+  'sequence',
+  'transitions'
+] as const
+function flattenForRender(v: unknown): string {
+  if (v == null) return ''
+  if (typeof v === 'string') return v
+  if (typeof v === 'number') return String(v)
+  if (typeof v === 'boolean' || typeof v === 'function') return ''
+  if (Array.isArray(v)) {
+    return v.map((x) => flattenForRender(x)).filter((s) => s.length > 0).join(' · ')
+  }
+  if (typeof v === 'object') {
+    return Object.entries(v as Record<string, unknown>)
+      .map(([k, val]) => {
+        const s = flattenForRender(val)
+        return s ? `${k}: ${s}` : ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
+}
+function coerceDocStrings<T extends Record<string, unknown>>(doc: T): T {
+  const out = { ...doc }
+  for (const f of TEXT_FIELDS) {
+    const v = out[f]
+    if (v !== undefined && typeof v !== 'string') {
+      ;(out as Record<string, unknown>)[f] = flattenForRender(v)
+    }
+  }
+  return out
+}
+
+/**
  * Analyze an image → DesignDoc (uses the `design` role's vision model). Calls the
  * real provider when one is configured; otherwise returns a mock. Real results
  * are normalized so missing site-only arrays don't break the UI.
@@ -473,7 +502,10 @@ export async function analyzeImage(
         : once
           ? await once(dataUrl, req)
           : await stream!(dataUrl, req, () => {})
-    return { doc: { ...EMPTY_DOC, ...raw, title: raw.title || title }, source: 'real' }
+    return {
+      doc: coerceDocStrings({ ...EMPTY_DOC, ...raw, title: raw.title || title }),
+      source: 'real'
+    }
   } catch (e) {
     return {
       doc: mock(),
@@ -537,13 +569,13 @@ export async function analyzeSiteShots(
     const raw = await b.analyzeSite(pages, req, onChunk || (() => {}))
     const perPageReplicas = raw.perPageReplicas
     return {
-      doc: {
+      doc: coerceDocStrings({
         ...EMPTY_DOC,
         ...raw,
         url,
         title: raw.title || title,
         assetType: raw.assetType || 'web-page'
-      },
+      }),
       perPageReplicas,
       source: 'real'
     }
@@ -610,12 +642,12 @@ export async function analyzeVideoFrames(
       title
     })
     return {
-      doc: {
+      doc: coerceDocStrings({
         ...EMPTY_DOC,
         ...raw,
         title: raw.title || title,
         assetType: raw.assetType || 'video'
-      },
+      }),
       motionDescriptions: raw.motionDescriptions,
       source: 'real'
     }

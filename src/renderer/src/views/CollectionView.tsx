@@ -3,7 +3,7 @@
 import type { Collection, Item } from '../lib/types'
 import { I } from '../lib/icons'
 import { Masonry } from '../components/Masonry'
-import { Button, IconButton } from '../components/ui'
+import { Button } from '../components/ui'
 
 export function CollectionView({
   collection,
@@ -46,9 +46,6 @@ export function CollectionView({
           <Button size="sm" onClick={onShare}>
             <I.Share size={14} /> Share
           </Button>
-          <IconButton size="sm">
-            <I.More size={15} />
-          </IconButton>
         </div>
       </div>
 

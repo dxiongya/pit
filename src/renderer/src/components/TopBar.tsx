@@ -12,7 +12,9 @@ export function TopBar({
   openShare,
   openRecord,
   openGroup,
-  openSettings
+  openSettings,
+  openSearch,
+  openGuide
 }: {
   view: View
   collectionId: string
@@ -21,6 +23,8 @@ export function TopBar({
   openRecord: () => void
   openGroup: () => void
   openSettings: () => void
+  openSearch: () => void
+  openGuide: () => void
 }): React.JSX.Element {
   const { collections, settings, setSetting } = useStore()
   const coll = collections.find((c) => c.id === collectionId)
@@ -55,11 +59,16 @@ export function TopBar({
     <div className="topbar drag">
       <div className="crumb no-drag">{crumb}</div>
       <div className="spacer" />
-      <div className="search-pill no-drag">
+      <button
+        type="button"
+        className="search-pill no-drag"
+        onClick={openSearch}
+        title="Search (⌘K)"
+      >
         <I.Search size={13} />
-        <input placeholder="Search everything…" />
+        <span className="search-pill-placeholder">Search everything…</span>
         <span className="kbd">⌘K</span>
-      </div>
+      </button>
       <div className="kbd-hint no-drag" title="Press ⌘V anywhere to paste a link or image">
         <I.Link size={13} /> <span className="kbd">⌘V</span> to paste
       </div>
@@ -69,10 +78,15 @@ export function TopBar({
         onClick={openGroup}
         title="Import a group of related images as one design study"
       >
-        <I.Layers size={15} />
+        <I.Images size={15} />
       </IconButton>
-      <IconButton size="sm" className="no-drag" onClick={openRecord} title="Record screen">
-        <span className="rec-dot" />
+      <IconButton
+        size="sm"
+        className="no-drag rec-btn"
+        onClick={openRecord}
+        title="Record screen"
+      >
+        <I.Record size={15} />
       </IconButton>
       <IconButton size="sm" className="no-drag" onClick={openShare} title="Share">
         <I.Share size={15} />
@@ -87,6 +101,9 @@ export function TopBar({
       </IconButton>
       <IconButton size="sm" className="no-drag" onClick={openSettings} title="Settings">
         <I.Settings size={15} />
+      </IconButton>
+      <IconButton size="sm" className="no-drag" onClick={openGuide} title="How pit works">
+        <I.Help size={15} />
       </IconButton>
     </div>
   )

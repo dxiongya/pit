@@ -49,42 +49,48 @@ export const xhsHandler: LinkHandler = {
         return out
       }
 
-      // Title — try several known containers.
+      const meta = (sel) => { const m = document.querySelector(sel); return m ? (m.getAttribute('content') || '').trim() : '' }
+
+      // Title — known containers, then h1, then og:title / <title>.
       const titleEl =
         document.querySelector('.note-detail .title, .note-content .title, .note-text .title') ||
         document.querySelector('h1') ||
         document.querySelector('.title')
       if (titleEl) out.title = titleEl.textContent.trim()
+      if (!out.title) out.title = meta('meta[property="og:title"]') || (document.title || '').replace(/\\s*[-|–｜].*$/, '').trim()
 
       // Author handle.
       const authorEl =
         document.querySelector('.author-wrapper .user-nickname, .username, .author .name')
       if (authorEl) out.author = authorEl.textContent.trim()
 
-      // Description / note text.
+      // Description / note text — known containers, then meta description.
       const descEl =
-        document.querySelector('.note-detail .desc, .note-content .desc, .note-text .desc')
+        document.querySelector('.note-detail .desc, .note-content .desc, .note-text .desc, #detail-desc')
       if (descEl) out.text = descEl.textContent.trim()
+      if (!out.text) out.text = meta('meta[name="description"]') || meta('meta[property="og:description"]')
 
-      // Images — the carousel uses <img> tags inside .swiper-slide etc.
-      // De-dup by src.
+      // Images — XHS rotates container class names constantly, so matching by
+      // class (.note-detail img, .swiper-slide img, …) breaks silently. Match by
+      // CDN HOST instead: note images live on *.xhscdn.com (sns-webpic-* /
+      // sns-na-*). Skip avatars (sns-avatar-*), emoji, tiny icons, and the junk
+      // www.xiaohongshu.com placeholder imgs. Keep the FULL src (its ?imageView2
+      // size params are needed — stripping them can 403).
       const seen = new Set()
-      const imgs = document.querySelectorAll(
-        '.note-detail img, .swiper-slide img, .img-container img, .image-container img, .note-content img'
-      )
-      imgs.forEach((img) => {
-        const src = img.getAttribute('src') || img.dataset.src
-        if (!src) return
-        // Skip avatars and tiny icons.
-        if (src.includes('avatar') || src.includes('emoji')) return
+      document.querySelectorAll('img').forEach((img) => {
+        const raw = img.currentSrc || img.getAttribute('src') || img.dataset.src
+        if (!raw) return
+        let host = ''
+        try { host = new URL(raw, location.href).host } catch (e) { return }
+        if (!/xhscdn\\.com$/.test(host)) return
+        if (/avatar/i.test(host) || /avatar|emoji/i.test(raw)) return
         const w = img.naturalWidth || img.width || 0
         const h = img.naturalHeight || img.height || 0
-        if (w > 0 && w < 200 && h > 0 && h < 200) return
-        // Prefer the highest-res variant by stripping size suffixes XHS appends.
-        const clean = src.replace(/\\?[^?]*$/, '')
-        if (seen.has(clean)) return
-        seen.add(clean)
-        out.images.push({ src: clean, width: w, height: h })
+        if (w && w < 200 && h && h < 200) return
+        const key = raw.split('?')[0]
+        if (seen.has(key)) return
+        seen.add(key)
+        out.images.push({ src: raw, width: w, height: h })
       })
 
       // Video (single).
@@ -130,7 +136,7 @@ export const xhsHandler: LinkHandler = {
     }
 
     ctx.onProgress?.(`Downloading ${extracted.images.length} images…`)
-    const images = await downloadAll(extracted.images)
+    const { media: images, dropped } = await downloadAll(extracted.images)
     const videos: ExtractedMedia[] = extracted.video
       ? [{ src: extracted.video.src }]
       : []
@@ -146,31 +152,37 @@ export const xhsHandler: LinkHandler = {
       warning:
         images.length === 0 && videos.length === 0
           ? 'No media extracted — the note may be text-only or the layout changed.'
-          : undefined
+          : dropped > 0
+            ? `${dropped} of ${extracted.images.length} images couldn't be downloaded (blocked or expired).`
+            : undefined
     }
   }
 }
 
 async function downloadAll(
   raw: { src: string; width?: number; height?: number }[]
-): Promise<ExtractedMedia[]> {
-  // Parallel with a small cap so we don't hammer the CDN.
+): Promise<{ media: ExtractedMedia[]; dropped: number }> {
+  // Parallel with a small cap so we don't hammer the CDN. Results are written
+  // back at their SOURCE index (not pushed on completion) so the carousel order
+  // is preserved regardless of which downloads finish first.
   const POOL = 4
-  const out: ExtractedMedia[] = []
-  const queue = [...raw]
+  const slots: (ExtractedMedia | null)[] = new Array(raw.length).fill(null)
+  let cursor = 0
   await Promise.all(
     Array.from({ length: POOL }, async () => {
-      while (queue.length) {
-        const next = queue.shift()
-        if (!next) break
+      while (true) {
+        const i = cursor++
+        if (i >= raw.length) break
+        const item = raw[i]
         try {
-          const dataUrl = await downloadToDataUrl(next.src)
-          out.push({ src: dataUrl, width: next.width, height: next.height })
+          const dataUrl = await downloadToDataUrl(item.src)
+          slots[i] = { src: dataUrl, width: item.width, height: item.height }
         } catch {
-          // skip — partial set is fine, the dispatcher will still build an item
+          // leave the slot null — partial set is fine; counted as dropped below
         }
       }
     })
   )
-  return out
+  const media = slots.filter((m): m is ExtractedMedia => m !== null)
+  return { media, dropped: raw.length - media.length }
 }

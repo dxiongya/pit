@@ -33,7 +33,14 @@ export default defineConfig(
       'react-refresh': eslintPluginReactRefresh
     },
     rules: {
-      ...eslintPluginReactHooks.configs.recommended.rules,
+      // Classic Hooks rules only. eslint-plugin-react-hooks v7's `recommended`
+      // also bundles React-Compiler diagnostics (immutability /
+      // set-state-in-effect / preserve-manual-memoization / …), but this app
+      // does NOT build with the React Compiler (vite uses plain @vitejs/plugin-
+      // react), so those diagnostics would flag working, never-compiled code.
+      // Enable them only if/when the compiler is added to the build.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       ...eslintPluginReactRefresh.configs.vite.rules
     }
   },

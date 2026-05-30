@@ -8,8 +8,12 @@ CREATE TABLE IF NOT EXISTS shares (
   password_hash  TEXT,                       -- bcrypt hash; NULL = public
   expires_at     INTEGER,                    -- unix seconds; NULL = never
   created_at     INTEGER NOT NULL,
-  view_count     INTEGER NOT NULL DEFAULT 0
+  view_count     INTEGER NOT NULL DEFAULT 0,
+  total_bytes    INTEGER NOT NULL DEFAULT 0  -- running sum of blob bytes, enforced by MAX_SHARE_BYTES
 );
+
+-- Migration for pre-existing deployments (run once if you deployed before total_bytes existed):
+--   wrangler d1 execute pit-shares --command "ALTER TABLE shares ADD COLUMN total_bytes INTEGER NOT NULL DEFAULT 0"
 
 CREATE INDEX IF NOT EXISTS shares_created_at_idx ON shares(created_at);
 CREATE INDEX IF NOT EXISTS shares_expires_at_idx ON shares(expires_at);

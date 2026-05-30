@@ -1,0 +1,48 @@
+name: Release
+
+# Push a semver tag (e.g. `v1.0.0`) to build installers for macOS, Windows, and
+# Linux and publish them to a GitHub Release. electron-builder reads publish:
+# github from electron-builder.yml and uploads to a release named for the tag.
+#
+# Artifacts are UNSIGNED (no Apple/Windows certs in CI) — CSC_IDENTITY_AUTO_DISCOVERY
+# is false so the build doesn't stall looking for a signing identity. On first
+# launch users will need to bypass Gatekeeper / SmartScreen (right-click → Open
+# on macOS). Add signing secrets later to ship trusted builds.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # create the GitHub Release and upload assets
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build & publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          pnpm run build
+          pnpm exec electron-builder --publish always

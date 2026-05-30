@@ -38,6 +38,18 @@ export const I = {
       <path d="M8 3v10M3 8h10" />
     </Icon>
   ),
+  Help: (p: IconProps) => (
+    <Icon {...p}>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M6.3 6.2a1.8 1.8 0 1 1 2.5 1.7c-.5.3-.8.6-.8 1.2" />
+      <path d="M8 11.2h.01" />
+    </Icon>
+  ),
+  ArrowRight: (p: IconProps) => (
+    <Icon {...p}>
+      <path d="M3 8h9M8.5 4.5L12 8l-3.5 3.5" />
+    </Icon>
+  ),
   Link: (p: IconProps) => (
     <Icon {...p}>
       <path d="M7 9.5l2 -2" />
@@ -148,6 +160,27 @@ export const I = {
       <rect x="2" y="3" width="12" height="10" rx="1.5" />
       <circle cx="6" cy="7" r="1.2" />
       <path d="M2.5 11l3 -3l3 3l2 -2l3 3" />
+    </Icon>
+  ),
+  Images: (p: IconProps) => (
+    <Icon {...p}>
+      <rect x="4" y="4.5" width="10" height="8" rx="1.5" />
+      <circle cx="7" cy="7.5" r="1" />
+      <path d="M4.5 11l2.5 -2.5l2 2l1.5 -1.5l3 3" />
+      <path d="M2.5 6v6.5a1 1 0 0 0 1 1H11" />
+    </Icon>
+  ),
+  Record: (p: IconProps) => (
+    <Icon {...p}>
+      <circle cx="8" cy="8" r="6" />
+      <circle cx="8" cy="8" r="3" fill="currentColor" stroke="none" />
+    </Icon>
+  ),
+  Zoom: (p: IconProps) => (
+    <Icon {...p}>
+      <circle cx="7" cy="7" r="4.2" />
+      <path d="M10 10l3.5 3.5" strokeLinecap="round" />
+      <path d="M5 7h4M7 5v4" strokeLinecap="round" />
     </Icon>
   ),
   Globe: (p: IconProps) => (

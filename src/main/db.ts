@@ -37,6 +37,18 @@ export function getDb(): Database.Database {
 }
 
 type Row = { data: string }
+
+/** Parse a row's JSON blob, tolerating a single corrupt row instead of
+ *  throwing and failing the entire list() call. Returns null for bad rows. */
+function parseRow(data: string, table: string): unknown | null {
+  try {
+    return JSON.parse(data)
+  } catch (e) {
+    console.error(`[db] skipping corrupt ${table} row:`, e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
 type ItemInput = {
   id: string
   collection?: string
@@ -47,9 +59,9 @@ type ItemInput = {
 type CollectionInput = { id: string; builtin?: boolean; [k: string]: unknown }
 
 export function listItems(): unknown[] {
-  return (getDb().prepare('SELECT data FROM items ORDER BY created_at DESC').all() as Row[]).map(
-    (r) => JSON.parse(r.data)
-  )
+  return (getDb().prepare('SELECT data FROM items ORDER BY created_at DESC').all() as Row[])
+    .map((r) => parseRow(r.data, 'items'))
+    .filter((v) => v !== null)
 }
 
 export function upsertItem(item: ItemInput): void {
@@ -71,9 +83,9 @@ export function deleteItem(id: string): void {
 }
 
 export function listCollections(): unknown[] {
-  return (getDb().prepare('SELECT data FROM collections').all() as Row[]).map((r) =>
-    JSON.parse(r.data)
-  )
+  return (getDb().prepare('SELECT data FROM collections').all() as Row[])
+    .map((r) => parseRow(r.data, 'collections'))
+    .filter((v) => v !== null)
 }
 
 export function upsertCollection(c: CollectionInput): void {

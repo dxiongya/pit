@@ -1,35 +1,13 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { RoleRequest, RouteInput, RoutingResult, CapturedPage } from '../shared/ipc'
 
 // pit bridge exposed to the renderer as `window.pit`.
-// Today: durable settings + real connection test. The capture/analyze methods
-// are intentionally omitted until the main process implements them — the
-// renderer's provider layer detects their absence and falls back to mock.
-interface RoleRequest {
-  kind: 'anthropic' | 'openai' | 'google' | 'openai-compatible'
-  name?: string
-  model: string
-  apiKey: string
-  baseURL?: string
-}
-
-interface RouteInput {
-  req: RoleRequest
-  item: { title?: string; description?: string; tags?: string[] }
-  collections: { id: string; name: string; prompt?: string; tags?: string[]; skip?: string[] }[]
-  threshold: number
-}
-interface RoutingResult {
-  suggestions: { collectionId: string; confidence: number; reason: string }[]
-  best: string
-}
-interface CapturedPage {
-  name: string
-  url: string
-  screenshot?: string
-  slices?: string[]
-  error?: string
-}
+// Exposes the full IPC surface: durable settings, library CRUD, the real AI
+// calls (test-connection / route / analyze-image|site|video / capture-site),
+// derive / share / video / recorder / link-handler / MCP channels, plus the
+// per-call streaming subscription pattern. Capture & analyze are fully wired to
+// the main process — mock is only the renderer's unconfigured/error fallback.
 
 const pit = {
   getSettings: (): Promise<Record<string, unknown> | null> =>
@@ -62,10 +40,13 @@ const pit = {
   // Link handlers — source-specific extractors (Twitter via xapi.to,
   // Xiaohongshu scrape, generic site capture). Dispatch happens in main.
   link: {
-    extract: (input: {
-      url: string
-      integrations?: { twitter?: { baseURL: string; apiKey: string } }
-    }): Promise<{
+    extract: (
+      input: {
+        url: string
+        integrations?: { xapi?: { apiKey: string } }
+      },
+      onProgress?: (msg: string) => void
+    ): Promise<{
       kind: 'tweet' | 'note' | 'site' | 'media'
       title: string
       author?: string
@@ -75,7 +56,19 @@ const pit = {
       videos: { src: string; caption?: string }[]
       capturedPages?: unknown[]
       warning?: string
-    }> => ipcRenderer.invoke('pit:link:extract', input),
+    }> => {
+      // Per-call progress channel (same idiom as captureSite) — handlers emit
+      // "Calling xapi…" / "Rendering note…" / "Downloading N images…".
+      const id = Math.random().toString(36).slice(2)
+      const channel = `pit:link:progress:${id}`
+      const listener = (_e: IpcRendererEvent, msg: string): void => onProgress?.(msg)
+      if (onProgress) ipcRenderer.on(channel, listener)
+      return ipcRenderer
+        .invoke('pit:link:extract', { ...input, id })
+        .finally(() => {
+          if (onProgress) ipcRenderer.removeListener(channel, listener)
+        })
+    },
     fetchToTmp: (input: { url: string; ext?: string }): Promise<{ path: string }> =>
       ipcRenderer.invoke('pit:link:fetch-to-tmp', input)
   },
@@ -100,39 +93,96 @@ const pit = {
     }): Promise<{ html: string; screenshot?: string; error?: string }> =>
       ipcRenderer.invoke('pit:derive:run', input)
   },
-  // pit.ink share — uploads blobs to R2 + writes manifest to D1, returns share URL.
+  // Share — uploads blobs to R2 + writes manifest to D1, returns share URL.
+  // `override` is the renderer's `settings.share` slice; omitted/empty means
+  // talk to the default pit.ink free service (1 h expiry, 50 MB cap).
   share: {
-    create: (input: {
-      kind: 'item' | 'collection'
-      item?: unknown
-      collection?: unknown
-      items?: unknown[]
-      password?: string
-      expiresInDays?: number
-    }): Promise<{ code: string; url: string; hasPassword: boolean; expiresAt: number | null }> =>
-      ipcRenderer.invoke('pit:share:create', input),
+    create: (
+      input: {
+        kind: 'item' | 'collection'
+        item?: unknown
+        collection?: unknown
+        items?: unknown[]
+        password?: string
+        expiresInDays?: number
+      },
+      override?: { workerUrl?: string; workerSecret?: string }
+    ): Promise<{ code: string; url: string; hasPassword: boolean; expiresAt: number | null }> =>
+      ipcRenderer.invoke('pit:share:create', input, override),
     // Inbound — driven by pit:// deep links delivered to the main process.
     fetch: (
-      code: string
+      code: string,
+      override?: { workerUrl?: string; workerSecret?: string }
     ): Promise<
       | { status: 'ready'; payload: unknown }
       | { status: 'needs-password' }
       | { status: 'expired' }
       | { status: 'not-found' }
       | { status: 'error'; message: string }
-    > => ipcRenderer.invoke('pit:share:fetch', code),
+    > => ipcRenderer.invoke('pit:share:fetch', code, override),
     authenticate: (
       code: string,
-      password: string
+      password: string,
+      override?: { workerUrl?: string; workerSecret?: string }
     ): Promise<{ ok: true; payload: unknown } | { ok: false; error: string }> =>
-      ipcRenderer.invoke('pit:share:authenticate', { code, password }),
-    fetchAsset: (code: string, asset: string): Promise<string | null> =>
-      ipcRenderer.invoke('pit:share:fetch-asset', { code, asset }),
+      ipcRenderer.invoke('pit:share:authenticate', { code, password }, override),
+    fetchAsset: (
+      code: string,
+      asset: string,
+      override?: { workerUrl?: string; workerSecret?: string }
+    ): Promise<string | null> =>
+      ipcRenderer.invoke('pit:share:fetch-asset', { code, asset }, override),
     onReceived: (cb: (payload: { code: string }) => void): (() => void) => {
       const listener = (_e: IpcRendererEvent, p: { code: string }): void => cb(p)
       ipcRenderer.on('pit:share:received', listener)
       return () => ipcRenderer.removeListener('pit:share:received', listener)
     }
+  },
+  // Item deep-link delivery (`pit://item/<id>` from MCP results, share-card
+  // links, etc.). The renderer subscribes once at startup; main fires whenever
+  // the OS hands us an item URL (cold start, second instance, macOS open-url).
+  onOpenItem: (cb: (payload: { id: string }) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, p: { id: string }): void => cb(p)
+    ipcRenderer.on('pit:item:open-requested', listener)
+    return () => ipcRenderer.removeListener('pit:item:open-requested', listener)
+  },
+  // MCP server discovery + the toggle / test actions the Settings card drives.
+  mcp: {
+    getInfo: (): Promise<{
+      dbPath: string
+      dbExists: boolean
+      dbSizeBytes: number
+      serverPath: string
+      serverBuilt: boolean
+      configPath: string
+      configExists: boolean
+      installed: boolean
+      registeredArg?: string
+      otherServers: string[]
+    }> => ipcRenderer.invoke('pit:mcp:info'),
+    install: (
+      serverPath: string
+    ): Promise<{
+      ok: boolean
+      configPath: string
+      backupPath?: string
+      preserved: string[]
+      error?: string
+    }> => ipcRenderer.invoke('pit:mcp:install', serverPath),
+    uninstall: (): Promise<{
+      ok: boolean
+      configPath: string
+      removed: boolean
+      error?: string
+    }> => ipcRenderer.invoke('pit:mcp:uninstall'),
+    test: (
+      serverPath: string
+    ): Promise<{
+      ok: boolean
+      steps: { name: string; ok: boolean; detail?: string }[]
+      elapsedMs: number
+      summary: string
+    }> => ipcRenderer.invoke('pit:mcp:test', serverPath)
   },
   // Video — extract keyframes (8 by default) from a local path. The dedup
   // happens in main so we don't waste IPC bandwidth on duplicate frames.
@@ -170,7 +220,6 @@ const pit = {
     begin: (opts: {
       mode: 'screen' | 'window' | 'region'
       sourceId?: string
-      audio: boolean
       cropRect?: { x: number; y: number; w: number; h: number }
       sourceLabel?: string
     }): void => ipcRenderer.send('pit:rec:begin', opts),

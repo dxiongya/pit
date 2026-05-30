@@ -306,6 +306,15 @@ function Card({ item, onClick }: { item: Item; onClick?: (i: Item) => void }): R
             </button>
           </div>
         )}
+
+        {!analyzing && !failed && item.analysisSource === 'mock' && (
+          <div
+            className="sample-badge"
+            title="Sample data — no AI provider was configured (or the call failed). Set up a model in Settings, then re-import for real analysis."
+          >
+            Sample
+          </div>
+        )}
       </div>
 
       <div className="card-body">

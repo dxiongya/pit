@@ -9,6 +9,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode
 } from 'react'
@@ -31,6 +32,7 @@ import {
   routeItem
 } from './ai/provider'
 import { lookupModel } from './catalog/lookup'
+import { useToast } from '../components/Toast'
 
 /**
  * Hosts that should be routed through a source-specific link handler in main
@@ -97,6 +99,7 @@ function settingsBridge(): SettingsBridge | undefined {
 }
 
 const LS_KEY = 'pit:settings'
+const SAVE_FAIL_MSG = 'Save failed — your change may not persist'
 
 async function loadSettings(): Promise<AppSettings> {
   const b = settingsBridge()
@@ -192,16 +195,22 @@ function mergeSettings(partial: Partial<AppSettings>): AppSettings {
 
 async function persistSettings(s: AppSettings): Promise<void> {
   const b = settingsBridge()
-  try {
-    if (b?.setSettings) await b.setSettings(s)
-  } catch {
-    /* ignore */
+  let bridgeFailed = false
+  if (b?.setSettings) {
+    try {
+      await b.setSettings(s)
+    } catch {
+      bridgeFailed = true
+    }
   }
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(s))
   } catch {
-    /* ignore */
+    /* ignore — localStorage is a best-effort fallback */
   }
+  // Durable store (main-process bridge) failed: let the caller surface it
+  // instead of silently dropping the change.
+  if (bridgeFailed) throw new Error('settings did not persist to disk')
 }
 
 interface StoreValue {
@@ -263,6 +272,17 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
   const [items, setItems] = useState<Item[]>([])
   const [hydrated, setHydrated] = useState(false)
 
+  // Surface persistence failures (a failed SQLite write would otherwise vanish,
+  // leaving in-memory state silently diverged from disk). Held in a ref so the
+  // CRUD callbacks below can report via `toastRef.current(...)` while keeping
+  // empty dependency arrays — they stay referentially stable, exactly as before.
+  // ToastHost's `push` is referentially stable (useCallback []), and ToastHost
+  // is mounted above this provider for the app's lifetime, so capturing it once
+  // in a ref is safe — and lets the CRUD callbacks below report failures without
+  // taking `push` as a dependency (which would churn their identities).
+  const { push: toastPush } = useToast()
+  const toastRef = useRef(toastPush)
+
   useEffect(() => {
     loadSettings().then((s) => {
       setSettings(s)
@@ -274,31 +294,41 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
   useEffect(() => {
     const b = persistBridge()
     if (!b?.items || !b?.collections) return
-    void b.items.list().then((rows) => {
-      const items = rows as Item[]
-      // Migration: link items used to bake in span:2 — strip it so the new
-      // masonry packs them on the same single-column grid as image cards.
-      let touched = 0
-      for (const i of items) {
-        if (i.kind === 'link' && i.span === 2) {
-          delete i.span
-          touched++
-          void b.items?.upsert(i)
+    void b.items
+      .list()
+      .then((rows) => {
+        const items = rows as Item[]
+        // Migration: link items used to bake in span:2 — strip it so the new
+        // masonry packs them on the same single-column grid as image cards.
+        let touched = 0
+        for (const i of items) {
+          if (i.kind === 'link' && i.span === 2) {
+            delete i.span
+            touched++
+            void b.items?.upsert(i)?.catch(() => toastRef.current(SAVE_FAIL_MSG))
+          }
         }
-      }
-      if (touched) console.info(`[pit] migrated ${touched} link items off legacy span:2`)
-      setItems(items)
-    })
-    void b.collections.list().then((rows) => {
-      const userCols = rows as Collection[]
-      // Builtins are always present + come first; merge user collections after.
-      setCollections([...BUILTIN_COLLECTIONS, ...userCols.filter((c) => !c.builtin)])
-    })
+        if (touched) console.info(`[pit] migrated ${touched} link items off legacy span:2`)
+        setItems(items)
+      })
+      .catch(() => toastRef.current('Couldn’t load your library from disk'))
+    void b.collections
+      .list()
+      .then((rows) => {
+        const userCols = rows as Collection[]
+        // Builtins are always present + come first; merge user collections after.
+        setCollections([...BUILTIN_COLLECTIONS, ...userCols.filter((c) => !c.builtin)])
+      })
+      .catch(() => toastRef.current('Couldn’t load collections from disk'))
   }, [])
 
   // persist on change (after initial hydration)
   useEffect(() => {
-    if (hydrated) void persistSettings(settings)
+    if (hydrated) {
+      persistSettings(settings).catch(() =>
+        toastRef.current('Settings didn’t save — they may reset on restart')
+      )
+    }
   }, [settings, hydrated])
 
   // wire visual settings to <body> data-attrs + CSS vars (same as the demo)
@@ -318,27 +348,29 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
     setSettings((s) => ({ ...s, ...patch }))
   }, [])
 
+  // Each persist call gets `?.catch(...)` so a failed DB write surfaces via toast
+  // instead of silently dropping. toastRef is a ref → callbacks keep empty deps.
   const addCollection = useCallback((c: Collection) => {
     setCollections((cs) => [...cs, c])
-    if (!c.builtin) void persistBridge()?.collections?.upsert(c)
+    if (!c.builtin) void persistBridge()?.collections?.upsert(c)?.catch(() => toastRef.current(SAVE_FAIL_MSG))
   }, [])
   const updateCollection = useCallback((id: string, patch: Partial<Collection>) => {
     setCollections((cs) => {
       const next = cs.map((c) => (c.id === id ? { ...c, ...patch } : c))
       const merged = next.find((c) => c.id === id)
-      if (merged && !merged.builtin) void persistBridge()?.collections?.upsert(merged)
+      if (merged && !merged.builtin) void persistBridge()?.collections?.upsert(merged)?.catch(() => toastRef.current(SAVE_FAIL_MSG))
       return next
     })
   }, [])
   const removeCollection = useCallback((id: string) => {
     setCollections((cs) => cs.filter((c) => c.id !== id))
     setItems((it) => it.map((i) => (i.collection === id ? { ...i, collection: 'inbox' } : i)))
-    void persistBridge()?.collections?.delete(id)
+    void persistBridge()?.collections?.delete(id)?.catch(() => toastRef.current(SAVE_FAIL_MSG))
   }, [])
 
   const addItem = useCallback((item: Item) => {
     setItems((it) => [item, ...it])
-    void persistBridge()?.items?.upsert(item)
+    void persistBridge()?.items?.upsert(item)?.catch(() => toastRef.current(SAVE_FAIL_MSG))
   }, [])
   const updateItem = useCallback((id: string, patch: Partial<Item>) => {
     setItems((it) => {
@@ -346,21 +378,21 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
       const merged = next.find((i) => i.id === id)
       // Skip persisting in-flight stream chunks — too noisy + huge text.
       if (merged && !('streamText' in patch && Object.keys(patch).length === 1)) {
-        void persistBridge()?.items?.upsert(merged)
+        void persistBridge()?.items?.upsert(merged)?.catch(() => toastRef.current(SAVE_FAIL_MSG))
       }
       return next
     })
   }, [])
   const removeItem = useCallback((id: string) => {
     setItems((it) => it.filter((i) => i.id !== id))
-    void persistBridge()?.items?.delete(id)
+    void persistBridge()?.items?.delete(id)?.catch(() => toastRef.current(SAVE_FAIL_MSG))
   }, [])
   // moveItem must be declared before importImage/importLink — they call it for auto-routing.
   const moveItem = useCallback((itemId: string, collectionId: string) => {
     setItems((it) => {
       const next = it.map((i) => (i.id === itemId ? { ...i, collection: collectionId } : i))
       const moved = next.find((i) => i.id === itemId)
-      if (moved) void persistBridge()?.items?.upsert(moved)
+      if (moved) void persistBridge()?.items?.upsert(moved)?.catch(() => toastRef.current(SAVE_FAIL_MSG))
       return next
     })
   }, [])
@@ -400,6 +432,7 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
             prompt: doc.agentPrompt,
             palette: doc.palette?.map((p) => p.hex),
             progress: undefined,
+            analysisSource: source,
             error: source === 'mock' ? error : undefined
           })
           // Auto-route: ask the routing model which collection's description
@@ -445,12 +478,21 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
         createdAt: Date.now()
       })
       try {
-        const ext = await window.pit.link.extract({
-          url,
-          integrations: settings.integrations as
-            | { twitter?: { baseURL: string; apiKey: string } }
-            | undefined
-        })
+        const ext = await window.pit.link.extract(
+          {
+            url,
+            integrations: settings.integrations as { xapi?: { apiKey: string } } | undefined
+          },
+          // Live progress from the handler (xapi call / render / downloads).
+          (msg) => updateItem(stubId, { progress: msg })
+        )
+        // Partial-media warning (e.g. some images blocked): surface it as a
+        // toast when we still got usable media — otherwise it's lost, since the
+        // import branches below create fresh items that don't carry it. The
+        // no-media case shows the warning as the failed-item error instead.
+        if (ext.warning && (ext.images.length > 0 || ext.videos.length > 0)) {
+          toastRef.current(ext.warning)
+        }
         // Promote the stub into the right kind based on what came back.
         if (ext.videos.length > 0) {
           // Video wins over images when both exist (most tweet/note videos
@@ -474,12 +516,26 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
             ext.images.map((i) => i.src),
             ext.title
           )
+        } else if (ext.text && ext.text.trim()) {
+          // Text-only tweet / note: no media, but the handler extracted real
+          // post text + author — keep it as a note instead of discarding the
+          // import (previously this was marked 'failed' and the text was lost).
+          updateItem(stubId, {
+            kind: 'note',
+            title: ext.title || host,
+            body: ext.text,
+            author: ext.author,
+            url: ext.canonicalUrl || url,
+            status: 'ready',
+            analysisSource: 'real',
+            progress: undefined
+          })
         } else {
           updateItem(stubId, {
             status: 'failed',
             error:
               ext.warning ||
-              `No media found in this ${ext.kind} — try a different link or use the generic capture flow.`,
+              `No media or text found in this ${ext.kind} — try a different link or use the generic capture flow.`,
             progress: undefined
           })
         }
@@ -539,7 +595,8 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
                 name: p.name,
                 status: 'done',
                 screenshot: p.slices[0],
-                slices: p.slices
+                slices: p.slices,
+                source: p.source
               })
             } else {
               captured.push({ name: p.name, status: 'queue' })
@@ -557,7 +614,7 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
           // array and the model mixed multiple pages into one bogus replica.
           const pagesForAnalysis = captured
             .filter((p) => p.slices?.length)
-            .map((p) => ({ name: p.name, slices: (p.slices || []).slice(0, 3) }))
+            .map((p) => ({ name: p.name, slices: (p.slices || []).slice(0, 3), source: p.source }))
           const { doc, perPageReplicas, source, error } = await analyzeSiteShots(
             pagesForAnalysis,
             url,
@@ -584,6 +641,7 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
             palette: doc.palette?.map((p) => p.hex),
             screenshot: shots[0],
             progress: undefined,
+            analysisSource: source,
             error: source === 'mock' ? error : undefined
           })
           // Auto-route: ask the routing model which collection's description
@@ -694,6 +752,7 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
             prompt: doc.stylePrompt || doc.agentPrompt,
             palette: doc.palette?.map((p) => p.hex),
             progress: undefined,
+            analysisSource: source,
             error: source === 'mock' ? error : undefined
           })
 
@@ -768,6 +827,7 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
             prompt: doc.stylePrompt || doc.agentPrompt,
             palette: doc.palette?.map((p) => p.hex),
             screenshot: valid[0],
+            analysisSource: source,
             error: source === 'mock' ? error : undefined
           })
           if (settings.ai.features.autoRoute) {
@@ -837,6 +897,7 @@ export function StoreProvider({ children }: { children: ReactNode }): React.JSX.
             prompt: doc.stylePrompt || doc.agentPrompt,
             palette: doc.palette?.map((p) => p.hex),
             progress: undefined,
+            analysisSource: source,
             error: source === 'mock' ? error : undefined
           })
         } catch (e) {

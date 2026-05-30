@@ -238,7 +238,7 @@ export function DeriveModal({
               textAlign: 'center'
             }}
           >
-            This item doesn't have a replica prompt yet — analyze it first.
+            This item doesn’t have a replica prompt yet — analyze it first.
           </div>
         )}
 

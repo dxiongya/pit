@@ -5,14 +5,13 @@
 // or hostile page from stalling the whole run.
 
 import { BrowserWindow } from 'electron'
+import { assertPublicHttpUrl } from './net-guard'
+import { HARVEST_SCRIPT } from './harvest'
+import type { CapturedPage, SourceFacts } from '../shared/ipc'
 
-export interface CapturedPage {
-  name: string
-  url: string
-  screenshot?: string // first slice — used as the placeholder thumbnail
-  slices?: string[] // full page cut into vision-friendly segments
-  error?: string
-}
+// Re-exported so `import { CapturedPage } from '../capture'` consumers keep
+// working; the canonical definition lives in shared/ipc.ts.
+export type { CapturedPage }
 
 /** Runs in the page: close consent/overlays, scroll to lazy-load, await images. */
 const PREP_SCRIPT = `(async () => {
@@ -45,23 +44,118 @@ const PREP_SCRIPT = `(async () => {
   } catch (e) {}
 })()`
 
-/** Runs in the page: collect same-origin nav links. */
-const DISCOVER_SCRIPT = `(() => {
+/**
+ * Runs in the page: find same-origin internal links worth crawling.
+ *
+ * Lessons from broken cases:
+ *   - Raycast / Vercel use classed <div>s instead of <nav>/<header>.
+ *   - Framer + Webflow sites have NO semantic landmark tags at all; the nav
+ *     lives inside `<div data-framer-name="Nav">` or `[data-w-id]` containers
+ *     with auto-generated class hashes.
+ *   - Hydration races: 400 ms after did-stop-loading isn't always enough for
+ *     a React/Framer app to mount its links. We wait for the anchor count to
+ *     stabilise before scoring.
+ *   - Marketing footers carry the most useful internal links (about /
+ *     pricing / changelog / blog) — never ignore them.
+ *
+ * Approach: one unified scoring pass over EVERY same-origin <a>, summing
+ * three signal sources (location, attribute hints, viewport position).
+ * Higher score = more likely a "real" nav target. We dedupe by pathname,
+ * sort descending, and return the top 12.
+ *
+ * Junk filters: hash-only, mailto/tel, file extensions, common service
+ * paths (/api, /cdn-cgi, /_next), and self-links.
+ */
+const DISCOVER_SCRIPT = `(async () => {
   const origin = location.origin
   const here = location.pathname.replace(/\\/$/, '')
-  const seen = new Set()
-  const out = []
-  document.querySelectorAll('nav a[href], header a[href], [role="navigation"] a[href]').forEach((a) => {
-    try {
-      const u = new URL(a.getAttribute('href'), location.href)
-      if (u.origin !== origin) return
-      const key = u.pathname.replace(/\\/$/, '')
-      if (!key || key === here || seen.has(key)) return
-      seen.add(key)
-      out.push(u.origin + u.pathname)
-    } catch (e) {}
-  })
-  return out.slice(0, 8)
+
+  // Wait for the anchor count to settle — covers SPAs whose nav mounts
+  // late. We poll up to ~1500 ms and bail as soon as two reads in a row
+  // agree (≥150ms apart).
+  let prev = -1
+  for (let i = 0; i < 8; i++) {
+    const n = document.querySelectorAll('a[href]').length
+    if (n > 0 && n === prev) break
+    prev = n
+    await new Promise((r) => setTimeout(r, 200))
+  }
+
+  const JUNK_EXT = /\\.(pdf|zip|dmg|exe|mp4|webm|mov|png|jpe?g|svg|gif|webp|woff2?|ico|css|js|json)(\\?|$)/i
+  const SKIP_PATH = /^\\/(cdn-cgi|api|_next|static|assets|wp-content|wp-includes)\\//i
+  const inViewportH = window.innerHeight || 800
+
+  // Score buckets. Each anchor accumulates points from independent signals.
+  const score = (a) => {
+    let s = 0
+    let n = a.parentElement
+    let depth = 0
+    let inSemantic = ''
+    while (n && depth < 8) {
+      const tag = n.tagName
+      const cls = (n.className && typeof n.className === 'string') ? n.className.toLowerCase() : ''
+      const dfn = n.getAttribute && (n.getAttribute('data-framer-name') || '')
+      // Strongest signal — landmark tag containing the anchor.
+      if (tag === 'NAV') { s += 1200; inSemantic = inSemantic || 'nav' }
+      if (tag === 'HEADER') { s += 900; inSemantic = inSemantic || 'header' }
+      if (tag === 'FOOTER') { s += 700; inSemantic = inSemantic || 'footer' }
+      if (n.getAttribute && n.getAttribute('role') === 'navigation') s += 1100
+      // Class / data-attribute hints, weaker but enough to disambiguate
+      // bare-div builders (Framer, Webflow, CSS modules, Tailwind UI).
+      if (cls) {
+        if (/(^|\\W)(nav|navigation|navbar|primary-nav)(\\W|$)/.test(cls)) s += 800
+        if (/(^|\\W)(header|topbar|masthead|brand-bar)(\\W|$)/.test(cls)) s += 600
+        if (/(^|\\W)(footer|site-footer|bottom)(\\W|$)/.test(cls)) s += 500
+        if (/(^|\\W)(menu|main-menu)(\\W|$)/.test(cls)) s += 300
+      }
+      if (dfn) {
+        const d = dfn.toLowerCase()
+        if (/(nav|menu|header|footer)/.test(d)) s += 700
+      }
+      n = n.parentElement
+      depth++
+    }
+    // Visibility + position. Off-screen or zero-sized anchors are
+    // typically mobile-menu duplicates or skip-links.
+    let rect = null
+    try { rect = a.getBoundingClientRect() } catch (e) {}
+    if (rect && rect.width > 0 && rect.height > 0) {
+      s += 200
+      // Bias toward links near the top of the document (after PREP scrolls
+      // back to 0, top = absolute y). Cap at first 2 viewports.
+      const yClamped = Math.max(0, Math.min(inViewportH * 2, rect.top))
+      s += Math.round((inViewportH * 2 - yClamped) / 8)
+    } else {
+      // Still allow hidden-nav links to count, just much less — many
+      // SPA hamburgers move the nav off-screen but still represent real
+      // routes. (Pass 4-of-last-resort behaviour, but unified.)
+      s += 10
+    }
+    return { s, inSemantic }
+  }
+
+  const best = new Map() // pathname → { score, source }
+  for (const a of document.querySelectorAll('a[href]')) {
+    const href = a.getAttribute('href')
+    if (!href) continue
+    let u
+    try { u = new URL(href, location.href) } catch (e) { continue }
+    if (u.origin !== origin) continue
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') continue
+    if (JUNK_EXT.test(u.pathname)) continue
+    if (SKIP_PATH.test(u.pathname)) continue
+    const key = u.pathname.replace(/\\/$/, '')
+    if (!key || key === here) continue
+    const { s, inSemantic } = score(a)
+    if (s <= 0) continue
+    const prev = best.get(key)
+    if (!prev || s > prev.score) best.set(key, { score: s, source: inSemantic || 'page' })
+  }
+
+  return [...best.entries()]
+    .sort((a, b) => b[1].score - a[1].score)
+    .slice(0, 12)
+    .map(([path]) => origin + path)
 })()`
 
 interface SizeBox {
@@ -206,6 +300,14 @@ async function captureOne(
     await loadWithTimeout(win, url, 20000)
     if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3')
     await evalInPage(win, PREP_SCRIPT)
+    // Source-level design harvest (real colors/fonts/tokens/tech from the live
+    // DOM) — best-effort; never let it fail the screenshot capture.
+    let source: SourceFacts | undefined
+    try {
+      source = (await evalInPage(win, HARVEST_SCRIPT)) as SourceFacts
+    } catch {
+      source = undefined
+    }
     const slices = await captureSlices(win)
     let links: string[] = []
     if (withDiscover) {
@@ -215,7 +317,7 @@ async function captureOne(
         links = []
       }
     }
-    return { page: { name, url, screenshot: slices[0], slices }, links }
+    return { page: { name, url, screenshot: slices[0], slices, source }, links }
   } catch (e) {
     return {
       page: { name, url, error: e instanceof Error ? e.message : 'capture failed' },
@@ -236,9 +338,16 @@ async function captureOne(
 export async function captureSite(
   url: string,
   onPage: (p: CapturedPage) => void,
-  maxPages = 5
+  // 6 = home + 5 internal pages. Enough to cover product/pricing/docs/blog/
+  // about for a typical product marketing site without making the run too
+  // long. The discover script returns up to 12 so we can grow this without
+  // changing anything else.
+  maxPages = 6
 ): Promise<CapturedPage[]> {
   const target = url.startsWith('http') ? url : `https://${url}`
+  // SSRF guard: reject loopback/private/link-local/metadata targets before we
+  // ever load the (renderer-supplied) URL in a real Chromium window.
+  await assertPublicHttpUrl(target)
   const { page: home, links } = await captureOne(target, pageName(target), true)
   const pages: CapturedPage[] = [home]
   onPage(home)
@@ -248,6 +357,13 @@ export async function captureSite(
     const name = pageName(link)
     if (seen.has(name)) continue
     seen.add(name)
+    // Discovered links come from the page's own DOM — re-validate each so a
+    // hostile page can't redirect the crawl onto an internal address.
+    try {
+      await assertPublicHttpUrl(link)
+    } catch {
+      continue
+    }
     const { page } = await captureOne(link, name, false)
     pages.push(page)
     onPage(page)

@@ -3,7 +3,7 @@
 // model list where vision is marked per-model. Then bind each function
 // (design / routing) to a provider + model. Plus feature toggles + appearance.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AIRole, AISettings, Provider, ProviderKind } from '../lib/types'
 import { I } from '../lib/icons'
 import {
@@ -24,8 +24,8 @@ import { lookupModel } from '../lib/catalog/lookup'
 import type { Modality } from '../lib/catalog/types'
 import { BRANDS, ProviderMark, brandForProvider, providerFromBrand } from '../lib/ai/brands'
 import { useStore } from '../lib/store'
-import { useToast } from '../components/Toast'
-import { Button, Field, IconButton, Input, Select, Switch } from '../components/ui'
+import { useToast, copyToClipboard } from '../components/Toast'
+import { Button, Field, IconButton, Input, Select, Slider, Switch } from '../components/ui'
 
 const ROLE_IDS = Object.keys(ROLE_META) as AIRole[]
 type ConnState = { state: 'idle' | 'testing' | 'ok' | 'bad'; msg: string }
@@ -276,15 +276,143 @@ export function SettingsView(): React.JSX.Element {
             label={`Auto-route threshold · ${ai.features.routeThreshold}%`}
             hint="Items below this confidence land in Inbox for manual review."
           >
-            <input
-              type="range"
+            <Slider
               min={50}
               max={100}
               step={5}
               value={ai.features.routeThreshold}
+              onValueChange={(v) => patchAI({ features: { ...ai.features, routeThreshold: v } })}
+            />
+          </Field>
+        </div>
+
+        {/* sharing */}
+        <div className="settings-card">
+          <h3>Sharing</h3>
+          <div className="pb-sub">
+            By default, pit publishes shares through the free{' '}
+            <a className="ui-link" href="https://pit.ink" target="_blank" rel="noreferrer">
+              pit.ink
+            </a>{' '}
+            service: <strong>50 MB max per share, links expire after 1 hour</strong>. For
+            longer-lived shares or larger uploads, deploy your own Cloudflare Worker (D1 + R2)
+            and paste its URL below. One click, free tier covers normal use.
+          </div>
+
+          <Field
+            label="Worker URL"
+            hint={
+              <>
+                Looks like <code>https://pit-share.YOUR-NAME.workers.dev</code> after deploy.
+                Leave empty to use the free service.{' '}
+                <a
+                  className="ui-link"
+                  href="https://deploy.workers.cloudflare.com/?url=https://github.com/dxiongya/pit-share-worker"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Deploy your own →
+                </a>
+              </>
+            }
+          >
+            <Input
+              type="text"
+              mono
+              placeholder="https://pit-share.your-name.workers.dev"
+              value={settings.share?.workerUrl ?? ''}
               onChange={(e) =>
-                patchAI({ features: { ...ai.features, routeThreshold: Number(e.target.value) } })
+                updateSettings({
+                  share: { ...settings.share, workerUrl: e.target.value }
+                })
               }
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </Field>
+
+          <Field
+            label="Worker secret"
+            hint={
+              <>
+                Optional — only needed if your Worker enforces{' '}
+                <code>SHARE_AUTH_SECRET</code>. Sent as <code>Authorization: Bearer ...</code>.
+              </>
+            }
+          >
+            <Input
+              type="password"
+              mono
+              placeholder="(only if your Worker requires auth)"
+              value={settings.share?.workerSecret ?? ''}
+              onChange={(e) =>
+                updateSettings({
+                  share: { ...settings.share, workerSecret: e.target.value }
+                })
+              }
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </Field>
+
+          <ShareStatusRow url={settings.share?.workerUrl} secret={settings.share?.workerSecret} />
+        </div>
+
+        {/* MCP */}
+        <div className="settings-card">
+          <h3>MCP server</h3>
+          <div className="pb-sub">
+            Expose your pit knowledge base to Claude (or any{' '}
+            <a
+              className="ui-link"
+              href="https://modelcontextprotocol.io"
+              target="_blank"
+              rel="noreferrer"
+            >
+              MCP-aware
+            </a>{' '}
+            client) as tools. Search your design references in chat, get back
+            <code> pit://item/&lt;id&gt;</code> links that re-open the modal here. Read-only;
+            no network.
+          </div>
+          <McpSetupRow />
+        </div>
+
+        {/* integrations */}
+        <div className="settings-card">
+          <h3>Integrations</h3>
+          <div className="pb-sub">
+            API keys for source-specific link handlers (Twitter / X, …). Each handler refuses
+            to run unless its slice is configured.
+          </div>
+
+          <Field
+            label="xAPI key"
+            hint={
+              <>
+                Used for Twitter / X link import. Get a key at{' '}
+                <a className="ui-link" href="https://xapi.to" target="_blank" rel="noreferrer">
+                  xapi.to
+                </a>
+                . Stored locally only.
+              </>
+            }
+          >
+            <Input
+              type="password"
+              mono
+              placeholder="sk-…"
+              value={settings.integrations?.xapi?.apiKey ?? ''}
+              onChange={(e) =>
+                updateSettings({
+                  integrations: {
+                    ...settings.integrations,
+                    xapi: { apiKey: e.target.value }
+                  }
+                })
+              }
+              autoComplete="off"
+              spellCheck={false}
             />
           </Field>
         </div>
@@ -350,17 +478,484 @@ export function SettingsView(): React.JSX.Element {
           </Field>
 
           <Field label={`Columns · ${settings.cols}`}>
-            <input
-              type="range"
+            <Slider
               min={3}
               max={6}
               step={1}
               value={settings.cols}
-              onChange={(e) => setSetting('cols', Number(e.target.value))}
+              onValueChange={(v) => setSetting('cols', v)}
             />
           </Field>
         </div>
       </div>
+    </div>
+  )
+}
+
+/* ============================================================
+   Sharing — self-hosted Worker status row
+   ============================================================ */
+type ShareStatus =
+  | { kind: 'idle' }
+  | { kind: 'free' }
+  | { kind: 'testing' }
+  | { kind: 'ok'; latencyMs: number }
+  | { kind: 'bad'; message: string }
+
+function ShareStatusRow({
+  url,
+  secret
+}: {
+  url?: string
+  secret?: string
+}): React.JSX.Element {
+  const trimmed = url?.trim()
+  const [status, setStatus] = useState<ShareStatus>({ kind: trimmed ? 'idle' : 'free' })
+  useEffect(() => {
+    setStatus({ kind: trimmed ? 'idle' : 'free' })
+  }, [trimmed])
+
+  const test = async (): Promise<void> => {
+    if (!trimmed) return
+    setStatus({ kind: 'testing' })
+    const base = trimmed.replace(/\/+$/, '').replace(/\/api$/, '')
+    const t0 = Date.now()
+    try {
+      const r = await fetch(`${base}/api/health`, {
+        headers: secret?.trim() ? { authorization: `Bearer ${secret.trim()}` } : {}
+      })
+      if (!r.ok) {
+        setStatus({ kind: 'bad', message: `HTTP ${r.status}` })
+        return
+      }
+      const j = (await r.json().catch(() => null)) as { ok?: boolean } | null
+      if (!j?.ok) {
+        setStatus({ kind: 'bad', message: 'Unexpected response — is this a pit-share Worker?' })
+        return
+      }
+      setStatus({ kind: 'ok', latencyMs: Date.now() - t0 })
+    } catch (e) {
+      setStatus({ kind: 'bad', message: (e as Error).message })
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        marginTop: 12,
+        padding: '10px 12px',
+        borderRadius: 8,
+        background: 'var(--bg-soft)',
+        border: '1px solid var(--hair)'
+      }}
+    >
+      <span style={{ flex: 1, fontSize: 12, color: 'var(--ink-3)' }}>
+        {status.kind === 'free' && (
+          <>
+            <strong style={{ color: 'var(--ink-2)' }}>Using free pit.ink</strong> · 50 MB ·
+            expires after 1 hour
+          </>
+        )}
+        {status.kind === 'idle' && (
+          <>
+            <strong style={{ color: 'var(--ink-2)' }}>Worker set</strong> · click Test to
+            verify
+          </>
+        )}
+        {status.kind === 'testing' && 'Pinging /api/health…'}
+        {status.kind === 'ok' && (
+          <>
+            <strong style={{ color: '#34c759' }}>✓ Connected</strong> · {status.latencyMs}ms ·
+            no limits applied
+          </>
+        )}
+        {status.kind === 'bad' && (
+          <>
+            <strong style={{ color: '#ff453a' }}>✗ Failed</strong> · {status.message}
+          </>
+        )}
+      </span>
+      {trimmed && (
+        <Button size="sm" onClick={test} disabled={status.kind === 'testing'}>
+          {status.kind === 'testing' ? 'Testing…' : 'Test'}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/* ============================================================
+   MCP — toggle, tutorial, in-app smoke test
+   ============================================================ */
+type McpInfo = Awaited<ReturnType<typeof window.pit.mcp.getInfo>>
+type McpTest = Awaited<ReturnType<typeof window.pit.mcp.test>>
+
+function McpSetupRow(): React.JSX.Element {
+  const toast = useToast()
+  const [info, setInfo] = useState<McpInfo | null>(null)
+  const [busy, setBusy] = useState<'install' | 'uninstall' | 'test' | null>(null)
+  const [test, setTest] = useState<McpTest | null>(null)
+  // Path the toggle would register: the built server.js, even if the build
+  // hasn't happened yet (so the snippet we show is the one that *will* work
+  // after the user runs npm run build).
+  const argPath = (() => {
+    if (!info) return ''
+    if (info.serverBuilt) return info.serverPath
+    return `${info.serverPath.replace(/\/$/, '')}/dist/server.js`
+  })()
+
+  // The MCP-client config snippet — paste into Claude Desktop / Cursor / Claude
+  // Code / any MCP client to use pit directly (the in-app toggle only writes
+  // Claude Desktop's config for you).
+  const mcpConfig = JSON.stringify(
+    { mcpServers: { pit: { command: 'node', args: [argPath] } } },
+    null,
+    2
+  )
+
+  const reload = async (): Promise<void> => {
+    try {
+      setInfo(await window.pit.mcp.getInfo())
+    } catch {
+      // ignore
+    }
+  }
+  useEffect(() => {
+    void reload()
+  }, [])
+
+  if (!info) return <div className="muted" style={{ fontSize: 12 }}>Loading…</div>
+
+  const sizeKb = (info.dbSizeBytes / 1024).toFixed(1)
+
+  const enable = async (): Promise<void> => {
+    if (!info.serverBuilt) {
+      toast.push('Build the MCP server first (see step 1 below).')
+      return
+    }
+    setBusy('install')
+    try {
+      const r = await window.pit.mcp.install(argPath)
+      if (r.ok) {
+        toast.push(
+          r.preserved.length
+            ? `Enabled — merged alongside ${r.preserved.length} other server(s).`
+            : 'MCP enabled in Claude Desktop config.'
+        )
+        await reload()
+      } else {
+        toast.push(`Could not write config: ${r.error || 'unknown error'}`)
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+  const disable = async (): Promise<void> => {
+    setBusy('uninstall')
+    try {
+      const r = await window.pit.mcp.uninstall()
+      if (r.ok) {
+        toast.push(
+          r.removed ? 'MCP disabled — pit entry removed.' : 'Already disabled.'
+        )
+        await reload()
+      } else {
+        toast.push(`Could not update config: ${r.error || 'unknown error'}`)
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+  const runTest = async (): Promise<void> => {
+    setBusy('test')
+    setTest(null)
+    try {
+      const r = await window.pit.mcp.test(argPath)
+      setTest(r)
+      toast.push(r.summary)
+    } finally {
+      setBusy(null)
+    }
+  }
+  const copyBuildCmd = async (): Promise<void> => {
+    const dir = info.serverPath.replace(/\/dist\/server\.js$/, '')
+    await copyToClipboard(`cd "${dir}" && npm install && npm run build`)
+    toast.push('Build command copied')
+  }
+
+  const copyMcpConfig = async (): Promise<void> => {
+    await copyToClipboard(mcpConfig)
+    toast.push('MCP config copied')
+  }
+
+  // — Step state for the tutorial. Each step toggles to "done" as the
+  //   underlying state becomes true; user can therefore see at a glance
+  //   how far they are.
+  const steps: { num: number; done: boolean; title: string; body: React.ReactNode }[] = [
+    {
+      num: 1,
+      done: info.serverBuilt,
+      title: 'Build the MCP server',
+      body: info.serverBuilt ? (
+        <span className="muted">Built. {sizeKb} KB DB ready at the path below.</span>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span>
+            Run once in a terminal — needs Node + npm on PATH. Takes ~10s.
+          </span>
+          <code
+            style={{
+              padding: '6px 10px',
+              borderRadius: 6,
+              background: 'var(--bg-card)',
+              border: '1px solid var(--hair)',
+              fontSize: 11,
+              fontFamily: 'var(--f-mono)',
+              display: 'block',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all'
+            }}
+          >
+            cd &quot;{info.serverPath}&quot; &amp;&amp; npm install &amp;&amp; npm run build
+          </code>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Button size="sm" onClick={copyBuildCmd}>
+              <I.Copy size={11} /> Copy command
+            </Button>
+            <Button size="sm" onClick={reload}>
+              I&apos;ve built it
+            </Button>
+          </div>
+        </div>
+      )
+    },
+    {
+      num: 2,
+      done: info.installed,
+      title: 'Toggle MCP on',
+      body: info.installed ? (
+        <span className="muted">
+          Registered in Claude Desktop config
+          {info.otherServers.length > 0 && (
+            <> (alongside: {info.otherServers.join(', ')})</>
+          )}
+          .
+        </span>
+      ) : info.serverBuilt ? (
+        <span className="muted">
+          Flip the switch up top — pit writes itself into Claude Desktop config,
+          leaving any existing MCP servers untouched. A timestamped backup is
+          kept next to the file.
+        </span>
+      ) : (
+        <span className="muted">Finish step 1 first.</span>
+      )
+    },
+    {
+      num: 3,
+      done: !!test?.ok,
+      title: 'Verify locally',
+      body: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <span className="muted">
+            Spawns the server, runs initialize → tools/list → search_items, and
+            prints the trail. No Claude Desktop restart needed for this.
+          </span>
+          <div>
+            <Button size="sm" onClick={runTest} disabled={!info.serverBuilt || busy === 'test'}>
+              {busy === 'test' ? 'Testing…' : 'Run local test'}
+            </Button>
+          </div>
+          {test && (
+            <div
+              style={{
+                padding: '8px 10px',
+                borderRadius: 7,
+                background: 'var(--bg-card)',
+                border: `1px solid ${test.ok ? 'color-mix(in srgb, #34c759 40%, var(--hair))' : 'color-mix(in srgb, #ff453a 40%, var(--hair))'}`,
+                fontSize: 11.5,
+                color: 'var(--ink-2)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4
+              }}
+            >
+              <div>
+                <strong style={{ color: test.ok ? '#34c759' : '#ff453a' }}>
+                  {test.ok ? '✓ Passed' : '✗ Failed'}
+                </strong>{' '}
+                · {test.elapsedMs}ms
+              </div>
+              {test.steps.map((s, i) => (
+                <div key={i} className="mono" style={{ fontSize: 10.5 }}>
+                  {s.ok ? '✓' : '✗'} {s.name}
+                  {s.detail && <span className="muted"> — {s.detail}</span>}
+                </div>
+              ))}
+              <div className="muted" style={{ marginTop: 2 }}>
+                {test.summary}
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    },
+    {
+      num: 4,
+      done: false, // we can't introspect the client's running state
+      title: 'Use it — copy the config into any MCP client',
+      body: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span className="muted">
+            The toggle above writes this into Claude Desktop for you. To use pit
+            anywhere else (Cursor, Windsurf, Claude Code…), paste this snippet
+            into that client&apos;s MCP config, then restart it:
+          </span>
+          <code
+            style={{
+              padding: '8px 10px',
+              borderRadius: 6,
+              background: 'var(--bg-card)',
+              border: '1px solid var(--hair)',
+              fontSize: 11,
+              fontFamily: 'var(--f-mono)',
+              display: 'block',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+              lineHeight: 1.5
+            }}
+          >
+            {mcpConfig}
+          </code>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Button size="sm" onClick={copyMcpConfig}>
+              <I.Copy size={11} /> Copy config
+            </Button>
+          </div>
+          <span className="muted" style={{ fontSize: 11 }}>
+            Then ask:{' '}
+            <em>&ldquo;Look in my pit and find a couple of dark dashboard references.&rdquo;</em>{' '}
+            — the client calls <code>search_items</code>; click any returned{' '}
+            <code>pit://item/&hellip;</code> link to jump straight to that item here.
+          </span>
+        </div>
+      )
+    }
+  ]
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+      {/* Top row: status + toggle */}
+      <div className="share-row">
+        <div className="share-row-text">
+          <div className="ui-label">
+            {info.installed ? 'Enabled' : 'Disabled'}
+          </div>
+          <div className="muted share-row-hint">
+            {info.installed ? (
+              <>
+                Pit MCP is registered in{' '}
+                <span className="mono" style={{ fontSize: 10.5 }}>
+                  {info.configPath}
+                </span>
+                . Claude Desktop will pick it up after a restart.
+              </>
+            ) : info.configExists ? (
+              <>
+                {info.otherServers.length > 0
+                  ? `Claude config has ${info.otherServers.length} other MCP server(s); enabling adds pit alongside them.`
+                  : 'Claude config exists but has no MCP servers yet — enabling adds pit.'}
+              </>
+            ) : (
+              <>
+                No Claude Desktop config detected. Enabling creates it at{' '}
+                <span className="mono" style={{ fontSize: 10.5 }}>
+                  {info.configPath}
+                </span>
+                .
+              </>
+            )}
+          </div>
+        </div>
+        <Switch
+          on={info.installed}
+          onChange={() => (info.installed ? void disable() : void enable())}
+        />
+      </div>
+
+      {/* DB / server status pill */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '8px 11px',
+          borderRadius: 8,
+          background: 'var(--bg-soft)',
+          border: '1px solid var(--hair)',
+          fontSize: 11.5,
+          color: 'var(--ink-3)'
+        }}
+      >
+        <span style={{ flex: 1 }}>
+          {info.serverBuilt ? (
+            <>
+              <strong style={{ color: '#34c759' }}>✓ Built</strong>
+            </>
+          ) : (
+            <>
+              <strong style={{ color: '#ff9f0a' }}>! Not built</strong>
+            </>
+          )}
+          {info.dbExists ? (
+            <>
+              {' '}
+              · DB {sizeKb} KB
+            </>
+          ) : (
+            <>
+              {' '}
+              · DB not found yet (open pit at least once)
+            </>
+          )}
+        </span>
+      </div>
+
+      {/* Tutorial steps */}
+      <div className="mcp-steps">
+        {steps.map((s) => (
+          <div key={s.num} className={`mcp-step${s.done ? ' done' : ''}`}>
+            <div className="mcp-step-num">
+              {s.done ? <I.Check size={12} /> : s.num}
+            </div>
+            <div className="mcp-step-body">
+              <div className="mcp-step-title">{s.title}</div>
+              <div className="mcp-step-detail">{s.body}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Paths reference (collapsible-feeling, just placed at the bottom) */}
+      <details style={{ fontSize: 11.5 }}>
+        <summary style={{ cursor: 'pointer', color: 'var(--ink-3)' }}>
+          Paths &amp; manual config (advanced)
+        </summary>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+          <Field label="MCP server" hint="Absolute path on this machine.">
+            <Input mono readOnly value={argPath} onClick={(e) => (e.target as HTMLInputElement).select()} />
+          </Field>
+          <Field label="pit database" hint="Read-only access; pit owns writes.">
+            <Input mono readOnly value={info.dbPath} onClick={(e) => (e.target as HTMLInputElement).select()} />
+          </Field>
+          <Field label="Claude Desktop config" hint={info.configExists ? 'Exists.' : 'Will be created on enable.'}>
+            <Input mono readOnly value={info.configPath} onClick={(e) => (e.target as HTMLInputElement).select()} />
+          </Field>
+        </div>
+      </details>
     </div>
   )
 }

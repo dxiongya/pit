@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import type { Collection, Item } from '../../lib/types'
 import { useStore } from '../../lib/store'
 import { I } from '../../lib/icons'
-import { Button } from '../../components/ui'
+import { Button, Input } from '../../components/ui'
 
 // Loose shape — matches what main/share.ts strips out at create time. We can
 // tighten this once the share format is stable enough to extract into a shared
@@ -65,13 +65,14 @@ export function ReceiveShareModal({
   const [password, setPassword] = useState('')
   const [pwSubmitting, setPwSubmitting] = useState(false)
   const [pwErr, setPwErr] = useState('')
-  const { addCollection, addItem } = useStore()
+  const { addCollection, addItem, settings } = useStore()
+  const shareCfg = settings.share
 
   // Initial fetch.
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const res = await window.pit.share.fetch(code)
+      const res = await window.pit.share.fetch(code, shareCfg)
       if (cancelled) return
       if (res.status === 'ready') setPhase({ kind: 'preview', payload: res.payload as SharePayload })
       else if (res.status === 'needs-password') setPhase({ kind: 'password' })
@@ -97,7 +98,7 @@ export function ReceiveShareModal({
     e.preventDefault()
     setPwSubmitting(true)
     setPwErr('')
-    const res = await window.pit.share.authenticate(code, password)
+    const res = await window.pit.share.authenticate(code, password, shareCfg)
     setPwSubmitting(false)
     if (res.ok) {
       setPhase({ kind: 'preview', payload: res.payload as SharePayload })
@@ -156,7 +157,7 @@ export function ReceiveShareModal({
       }
 
       if (screenshotAsset) {
-        const dataUrl = await window.pit.share.fetchAsset(code, screenshotAsset)
+        const dataUrl = await window.pit.share.fetchAsset(code, screenshotAsset, shareCfg)
         if (dataUrl) newItem.screenshot = dataUrl
       }
 
@@ -166,7 +167,7 @@ export function ReceiveShareModal({
               design.pages.map(async (p) => {
                 const { thumbAsset, ...rest } = p
                 if (thumbAsset) {
-                  const dataUrl = await window.pit.share.fetchAsset(code, thumbAsset)
+                  const dataUrl = await window.pit.share.fetchAsset(code, thumbAsset, shareCfg)
                   if (dataUrl) return { ...rest, screenshot: dataUrl }
                 }
                 return rest
@@ -206,25 +207,12 @@ export function ReceiveShareModal({
             <h3>Password required</h3>
             <div className="sub">This share is protected. Ask the sender for the password.</div>
             <form onSubmit={submitPassword} style={{ marginTop: 16 }}>
-              <input
+              <Input
                 type="password"
                 autoFocus
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="ui-input"
-                style={{
-                  width: '100%',
-                  height: 34,
-                  padding: '0 12px',
-                  border: '1px solid var(--hair-2)',
-                  borderRadius: 7,
-                  background: 'var(--bg-card)',
-                  color: 'var(--ink)',
-                  fontFamily: 'var(--f-ui)',
-                  fontSize: 13,
-                  outline: 'none'
-                }}
               />
               {pwErr && (
                 <div style={{ marginTop: 8, color: '#c0392b', fontSize: 12 }}>{pwErr}</div>
@@ -259,7 +247,7 @@ export function ReceiveShareModal({
               const isCollection = phase.payload.kind === 'collection'
               return (
                 <>
-                  <h3>You've been sent a share</h3>
+                  <h3>You’ve been sent a share</h3>
                   <div className="sub">
                     Importing creates a new {isCollection ? 'collection' : 'item'} in your library.
                   </div>
@@ -306,7 +294,7 @@ export function ReceiveShareModal({
           <>
             <h3>Imported</h3>
             <div className="sub">
-              "{phase.collectionName}" is now in your library.
+              “{phase.collectionName}” is now in your library.
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
               <Button size="sm" onClick={onClose}>

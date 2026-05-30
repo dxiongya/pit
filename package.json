@@ -1,10 +1,14 @@
 {
   "name": "pit",
   "version": "1.0.0",
-  "description": "An Electron application with React and TypeScript",
+  "description": "Collect design references — capture links, images, and videos; AI extracts a DESIGN.md and routes them into collections.",
   "main": "./out/main/index.js",
-  "author": "example.com",
-  "homepage": "https://electron-vite.org",
+  "author": "dxiongya",
+  "homepage": "https://github.com/dxiongya/pit",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dxiongya/pit.git"
+  },
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",

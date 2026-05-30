@@ -19,3 +19,8 @@ bucket_name = "pit-shares"
 # Public origin used to build share URLs returned by the API. Override with
 # `wrangler.toml [env.prod]` once the pit.ink custom domain is bound.
 PUBLIC_ORIGIN = "https://pit.ink"
+# Free-tier limits enforced on the pit.ink instance. Self-hosters: comment
+# these out to lift the caps (or set your own). See README.md.
+MAX_SHARE_BYTES = "50000000"      # 50 MB per share (manifest + all blobs)
+MAX_EXPIRY_SECONDS = "3600"       # 1 hour TTL ceiling
+# SHARE_AUTH_SECRET = "..."       # use `wrangler secret put` instead of inlining

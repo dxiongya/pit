@@ -8,6 +8,7 @@ import { I } from '../../lib/icons'
 import { copyToClipboard, useToast } from '../../components/Toast'
 import { Button } from '../../components/ui'
 import { Lightbox } from './Lightbox'
+import { safeText } from '../../lib/aiText'
 
 type TabId =
   | 'prompt'
@@ -94,9 +95,9 @@ export function LinkDetail({
             type="button"
             className="stage-expand"
             onClick={() => setLightbox(lightboxSrc)}
-            title="Expand page (zoom + pan)"
+            title="Open large preview (zoom + pan)"
           >
-            <I.Eye size={14} />
+            <I.Zoom size={14} />
           </button>
         )}
         <div className="detail-stage-head">
@@ -139,19 +140,23 @@ export function LinkDetail({
           >
             {page?.slices?.length ? (
               // Stack every slice vertically — this is the actual long page.
+              // Clicking any slice opens the full lightbox (which shows the
+              // stitched concat from lightboxSrc).
               page.slices.map((src, i) => (
                 <img
                   key={i}
                   src={src}
                   alt={`${page.name}-${i}`}
-                  style={{ display: 'block', width: '100%' }}
+                  onClick={() => lightboxSrc && setLightbox(lightboxSrc)}
+                  style={{ display: 'block', width: '100%', cursor: lightboxSrc ? 'zoom-in' : 'default' }}
                 />
               ))
             ) : page?.screenshot ? (
               <img
                 src={page.screenshot}
                 alt={page.name}
-                style={{ display: 'block', width: '100%' }}
+                onClick={() => lightboxSrc && setLightbox(lightboxSrc)}
+                style={{ display: 'block', width: '100%', cursor: lightboxSrc ? 'zoom-in' : 'default' }}
               />
             ) : (
               <div style={{ width: '100%', aspectRatio: 16 / 10, background: 'var(--bg-soft)' }} />
@@ -159,34 +164,35 @@ export function LinkDetail({
           </div>
         </div>
 
-        {/* page strip */}
+        {/* page strip — uses outline (not border) for the selected ring so
+            switching pages doesn't change any thumb's geometry. With a border
+            change the strip reflowed by 1–2px and the cursor ended up over a
+            different thumb than the one being highlighted. */}
         <div
-          className="no-scrollbar"
+          className="no-scrollbar page-strip"
           style={{
             display: 'flex',
-            gap: 6,
+            gap: 8,
             padding: '10px 18px 14px',
             borderTop: '1px solid var(--hair)',
             overflowX: 'auto'
           }}
         >
           {pageList.map((p, i) => (
-            <div
+            <button
               key={p.name}
+              type="button"
               onClick={() => setCurrentPage(i)}
+              className={`page-thumb${i === currentPage ? ' active' : ''}`}
               style={{
-                width: 64,
-                height: 44,
-                borderRadius: 6,
                 background: p.screenshot
                   ? `center/cover url(${p.screenshot})`
                   : p.bg || 'var(--bg-soft)',
-                border: i === currentPage ? '2px solid var(--ink)' : '1px solid var(--hair)',
-                cursor: 'pointer',
-                flexShrink: 0,
                 opacity: p.status === 'queue' ? 0.4 : 1
               }}
               title={`/${p.name}`}
+              aria-label={`Show page /${p.name}`}
+              aria-pressed={i === currentPage}
             />
           ))}
         </div>
@@ -275,7 +281,7 @@ export function PromptTab({
   const label = sub === 'style' ? 'Style · apply this design to a new page' : replicaLabel
   const empty =
     sub === 'style'
-      ? doc.description || 'No style prompt yet.'
+      ? safeText(doc.description) || 'No style prompt yet.'
       : 'No replica prompt for this page — re-analyze with the latest model to populate.'
   const copy = (): void => {
     if (!active) return
@@ -361,7 +367,9 @@ function PagesAnalysis({ doc }: { doc: DesignDoc }): React.JSX.Element {
         <div className="section-h">
           <span>Summary</span>
         </div>
-        <div className="prose">{doc.description}</div>
+        <div className="prose" style={{ whiteSpace: 'pre-wrap' }}>
+          {safeText(doc.description)}
+        </div>
       </div>
     </>
   )
@@ -375,7 +383,9 @@ export function ThemeAnalysis({ doc }: { doc: DesignDoc }): React.JSX.Element {
           <div className="section-h">
             <span>Visual theme &amp; atmosphere</span>
           </div>
-          <div className="prose">{doc.theme}</div>
+          <div className="prose" style={{ whiteSpace: 'pre-wrap' }}>
+            {safeText(doc.theme)}
+          </div>
         </div>
       )}
       {doc.responsive && (
@@ -383,7 +393,9 @@ export function ThemeAnalysis({ doc }: { doc: DesignDoc }): React.JSX.Element {
           <div className="section-h">
             <span>Responsive behavior</span>
           </div>
-          <div className="prose">{doc.responsive}</div>
+          <div className="prose" style={{ whiteSpace: 'pre-wrap' }}>
+            {safeText(doc.responsive)}
+          </div>
         </div>
       )}
       {/* Agent prompt guide removed — the Prompt tab already shows the full
@@ -444,8 +456,8 @@ export function TypeAnalysis({ doc }: { doc: DesignDoc }): React.JSX.Element {
           <span className="num">0 faces</span>
         </div>
         <div className="muted" style={{ padding: 16, textAlign: 'center', fontSize: 12 }}>
-          No typography extracted — text either wasn't legible in the source, or
-          the model couldn't identify specific faces.
+          No typography extracted — text either wasn’t legible in the source, or
+          the model couldn’t identify specific faces.
         </div>
       </div>
     )
@@ -589,8 +601,8 @@ export function LayoutAnalysis({ doc }: { doc: DesignDoc }): React.JSX.Element {
                 ))}
               </div>
             )}
-            <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-              {doc.layoutNote}
+            <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', whiteSpace: 'pre-wrap' }}>
+              {safeText(doc.layoutNote)}
             </div>
           </div>
         </div>

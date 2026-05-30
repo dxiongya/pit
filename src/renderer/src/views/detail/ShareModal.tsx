@@ -1,11 +1,13 @@
-// ShareModal.tsx — share an item or a whole collection to pit.ink.
-// Talks to the share Worker via the main process (window.pit.share.create).
+// ShareModal.tsx — share an item or a whole collection.
+// Talks to either the free pit.ink Worker or a user-configured self-hosted
+// Cloudflare Worker (Settings → Sharing). Reads settings.share to decide.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Collection, Item } from '../../lib/types'
 import { I } from '../../lib/icons'
 import { copyToClipboard, useToast } from '../../components/Toast'
 import { Button, Field, Input, Select, Switch } from '../../components/ui'
+import { useStore } from '../../lib/store'
 import {
   gradientFromId,
   listShares,
@@ -46,19 +48,44 @@ export function ShareModal({
   onClose: () => void
 }): React.JSX.Element {
   const toast = useToast()
+  const { settings } = useStore()
+  const shareCfg = settings.share
+  // Self-hosted (workerUrl set) → user controls everything.
+  // Free pit.ink → server forces 1 h expiry + 50 MB cap, so TTL/password
+  // pickers either disappear or render disabled.
+  const isSelfHosted = useMemo(() => !!shareCfg?.workerUrl?.trim(), [shareCfg])
   const [usePassword, setUsePassword] = useState(false)
   const [password, setPassword] = useState('')
-  const [ttl, setTtl] = useState<Ttl>('never')
+  const [ttl, setTtl] = useState<Ttl>(isSelfHosted ? 'never' : '1')
   const [phase, setPhase] = useState<Phase>('idle')
   const [err, setErr] = useState('')
   const [result, setResult] = useState<{ url: string; code: string } | null>(null)
   const [copied, setCopied] = useState(false)
   const [history, setHistory] = useState<ShareRecord[]>(() => listShares())
 
+  // Item selection — collections can share a SUBSET so you don't upload the
+  // whole set every time (saves R2 / stays under the free 50 MB cap). Default:
+  // everything selected. Single-item shares have nothing to pick.
+  const allItems = target.kind === 'collection' ? target.items : []
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(allItems.map((i) => i.id))
+  )
+  const selectedItems =
+    target.kind === 'collection' ? allItems.filter((i) => selectedIds.has(i.id)) : [target.item]
+  const allSelected = allItems.length > 0 && selectedItems.length === allItems.length
+  const toggleItem = (id: string): void =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const toggleAll = (): void =>
+    setSelectedIds(allSelected ? new Set() : new Set(allItems.map((i) => i.id)))
+
   // Stable gradient cover seeded by the target's id — same collection / item
   // always shows the same colors so the avatar is recognizable.
-  const seedId =
-    target.kind === 'collection' ? target.collection.id : target.item.id
+  const seedId = target.kind === 'collection' ? target.collection.id : target.item.id
   const coverGradient = gradientFromId(seedId)
 
   // Esc closes when we're not mid-upload, so the user doesn't accidentally
@@ -72,7 +99,7 @@ export function ShareModal({
   }, [onClose, phase])
 
   const title = describeTarget(target)
-  const itemCount = target.kind === 'item' ? 1 : target.items.length
+  const itemCount = selectedItems.length
 
   const handleCreate = async (): Promise<void> => {
     setPhase('creating')
@@ -89,11 +116,11 @@ export function ShareModal({
           : {
               kind: 'collection' as const,
               collection: target.collection,
-              items: target.items,
+              items: selectedItems,
               password: usePassword && password ? password : undefined,
               expiresInDays: ttl === 'never' ? undefined : parseInt(ttl, 10)
             }
-      const res = await window.pit.share.create(input)
+      const res = await window.pit.share.create(input, shareCfg)
       setResult({ url: res.url, code: res.code })
       setPhase('done')
       // Persist locally so the modal's history list can show it next time.
@@ -104,7 +131,7 @@ export function ShareModal({
         targetKind: target.kind,
         targetName:
           target.kind === 'collection' ? target.collection.name : target.item.title || 'item',
-        itemCount: target.kind === 'collection' ? target.items.length : 1,
+        itemCount: selectedItems.length,
         hasPassword: res.hasPassword,
         expiresAt: res.expiresAt
       })
@@ -147,6 +174,37 @@ export function ShareModal({
           Anyone with the link can view. {usePassword && phase === 'idle' && 'Password required.'}
         </div>
 
+        {phase === 'idle' && (
+          <div
+            className="share-service-pill"
+            style={{
+              marginTop: 10,
+              padding: '8px 11px',
+              borderRadius: 8,
+              fontSize: 11.5,
+              background: isSelfHosted
+                ? 'color-mix(in srgb, #34c759 16%, transparent)'
+                : 'var(--bg-soft)',
+              border: `1px solid ${isSelfHosted ? 'color-mix(in srgb, #34c759 30%, transparent)' : 'var(--hair)'}`,
+              color: 'var(--ink-2)',
+              lineHeight: 1.45
+            }}
+          >
+            {isSelfHosted ? (
+              <>
+                <strong>✓ Your Cloudflare Worker</strong> · no limits applied
+              </>
+            ) : (
+              <>
+                <strong>Free pit.ink</strong> · 50 MB · expires after 1 hour.{' '}
+                <span className="muted">
+                  Need longer? Settings → Sharing → deploy your own Worker.
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="share-preview">
           <div className="ph" style={{ background: coverGradient }}>
             <span className="share-preview-glyph">
@@ -156,13 +214,62 @@ export function ShareModal({
           <div>
             <div style={{ fontWeight: 600 }}>{title}</div>
             <div className="muted" style={{ fontSize: 12 }}>
-              {itemCount} {itemCount === 1 ? 'item' : 'items'} · public link
+              {target.kind === 'collection' && !allSelected
+                ? `${selectedItems.length} of ${allItems.length} items`
+                : `${itemCount} ${itemCount === 1 ? 'item' : 'items'}`}{' '}
+              · public link
             </div>
           </div>
         </div>
 
         {phase === 'idle' && (
           <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Item picker — collections only. Pick a subset to keep uploads
+                small; tap a tile to toggle it. Defaults to everything on. */}
+            {target.kind === 'collection' && allItems.length > 1 && (
+              <div className="share-picker">
+                <div className="share-picker-head">
+                  <div className="ui-label">
+                    Items to share
+                    <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
+                      · {selectedItems.length} of {allItems.length}
+                    </span>
+                  </div>
+                  <button type="button" className="share-picker-all" onClick={toggleAll}>
+                    {allSelected ? 'Clear all' : 'Select all'}
+                  </button>
+                </div>
+                <div className="share-picker-grid">
+                  {allItems.map((it) => {
+                    const on = selectedIds.has(it.id)
+                    return (
+                      <button
+                        type="button"
+                        key={it.id}
+                        className={`share-picker-cell${on ? ' on' : ''}`}
+                        onClick={() => toggleItem(it.id)}
+                        title={it.title || it.text || it.url || 'Untitled'}
+                        aria-pressed={on}
+                      >
+                        <div
+                          className="share-picker-thumb"
+                          style={
+                            it.screenshot
+                              ? { backgroundImage: `url(${it.screenshot})` }
+                              : { background: it.bg || gradientFromId(it.id) }
+                          }
+                        />
+                        {on && (
+                          <span className="share-picker-check">
+                            <I.Check size={11} />
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             {/* Password row — switch sits to the right of the row, inside the
                 modal. Custom flex layout instead of Field.labelExtra (whose
                 positioning was pushing the switch outside the modal). */}
@@ -186,9 +293,22 @@ export function ShareModal({
               />
             )}
 
-            <Field label="Expires">
-              <Select value={ttl} onValueChange={(v) => setTtl(v)} items={TTL_ITEMS} />
-            </Field>
+            {isSelfHosted ? (
+              <Field label="Expires">
+                <Select value={ttl} onValueChange={(v) => setTtl(v)} items={TTL_ITEMS} />
+              </Field>
+            ) : (
+              <Field
+                label="Expires"
+                hint="Free pit.ink shares always expire after 1 hour. Self-host for longer TTLs."
+              >
+                <Select
+                  value={'1h-fixed' as never}
+                  onValueChange={() => {}}
+                  items={[{ value: '1h-fixed' as never, label: '1 hour (free pit.ink)' }]}
+                />
+              </Field>
+            )}
 
             {history.length > 0 && (
               <div className="share-history">
@@ -250,7 +370,7 @@ export function ShareModal({
               <Button
                 variant="primary"
                 onClick={handleCreate}
-                disabled={usePassword && !password}
+                disabled={(usePassword && !password) || itemCount === 0}
               >
                 <I.Link size={13} /> Create link
               </Button>

@@ -266,7 +266,7 @@ function ItemCard({
             {hostFromUrl(item.url)}
           </a>
         )}
-        {item.text && <blockquote className="card-quote">"{item.text}"</blockquote>}
+        {item.text && <blockquote className="card-quote">“{item.text}”</blockquote>}
         {item.author && <div className="card-author">— {item.author}</div>}
 
         {item.design?.theme && <div className="card-theme">{item.design.theme}</div>}

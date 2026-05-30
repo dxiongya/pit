@@ -57,7 +57,7 @@ export function openToolbar(): void {
   if (mainBeforeRecord) mainBeforeRecord.minimize()
 
   const primary = screen.getPrimaryDisplay()
-  const w = 860
+  const w = 660
   const h = 84
   toolbarWin = new BrowserWindow({
     width: w,
@@ -112,7 +112,7 @@ export function closeToolbar(): void {
 export function resizeToolbar(h: number): void {
   if (!toolbarWin || toolbarWin.isDestroyed()) return
   const primary = screen.getPrimaryDisplay()
-  const w = 860
+  const w = 660
   const bottomMargin = 28
   const newY = primary.workArea.y + primary.workArea.height - h - bottomMargin
   toolbarWin.setBounds({

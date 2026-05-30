@@ -6,6 +6,7 @@ import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react
 import { Select as BaseSelect } from '@base-ui-components/react/select'
 import { Switch as BaseSwitch } from '@base-ui-components/react/switch'
 import { Input as BaseInput } from '@base-ui-components/react/input'
+import { Slider as BaseSlider } from '@base-ui-components/react/slider'
 import { I } from '../../lib/icons'
 
 /* Button — variants: default | primary | ghost | accent; sizes: md | sm */
@@ -139,6 +140,41 @@ export function Field({
       {children}
       {hint && <div className="ui-hint">{hint}</div>}
     </div>
+  )
+}
+
+/* Range slider (Base UI Slider) — single value; min/max/step like native range. */
+export function Slider({
+  value,
+  onValueChange,
+  min = 0,
+  max = 100,
+  step = 1,
+  className = ''
+}: {
+  value: number
+  onValueChange: (v: number) => void
+  min?: number
+  max?: number
+  step?: number
+  className?: string
+}): React.JSX.Element {
+  return (
+    <BaseSlider.Root
+      value={value}
+      onValueChange={(v) => onValueChange(typeof v === 'number' ? v : v[0])}
+      min={min}
+      max={max}
+      step={step}
+      className={`ui-slider ${className}`.trim()}
+    >
+      <BaseSlider.Control className="ui-slider-control">
+        <BaseSlider.Track className="ui-slider-track">
+          <BaseSlider.Indicator className="ui-slider-indicator" />
+          <BaseSlider.Thumb className="ui-slider-thumb" />
+        </BaseSlider.Track>
+      </BaseSlider.Control>
+    </BaseSlider.Root>
   )
 }
 

@@ -175,15 +175,7 @@ export function NewCollectionView({
             </div>
             <textarea
               className="prompt-area"
-              style={{
-                width: '100%',
-                minHeight: 140,
-                marginTop: 12,
-                padding: 14,
-                lineHeight: 1.6,
-                fontFamily: 'var(--f-ui)',
-                fontSize: 14
-              }}
+              style={{ marginTop: 12, minHeight: 140 }}
               placeholder={`e.g. Mobile app UI — iOS and Android screens, native components, on-boarding flows, tab bars. Skip desktop and browser-based web layouts.
 
 The more concrete you are about scope (mobile vs desktop, native vs web, marketing vs product, etc), the more confidently AI can sort items into here.`}

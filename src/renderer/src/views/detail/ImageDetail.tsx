@@ -71,15 +71,13 @@ export function ImageDetail({
     void copyToClipboard(palette.map((p) => p.hex.toUpperCase()).join(', '))
     toast.push('Palette copied')
   }
-  const exportAs = (kind: 'css' | 'tailwind' | 'figma' | 'ase'): void => {
-    const hexes = palette.map((p) => p.hex.toUpperCase())
-    let text = hexes.join(', ')
-    if (kind === 'css')
-      text = `:root {\n${palette.map((p, i) => `  --color-${i + 1}: ${p.hex.toUpperCase()}; /* ${p.role} */`).join('\n')}\n}`
-    else if (kind === 'tailwind')
-      text = `colors: {\n${palette.map((p, i) => `  '${p.role || `c${i + 1}`}': '${p.hex.toUpperCase()}',`).join('\n')}\n}`
+  const exportAs = (kind: 'css' | 'tailwind'): void => {
+    const text =
+      kind === 'css'
+        ? `:root {\n${palette.map((p, i) => `  --color-${i + 1}: ${p.hex.toUpperCase()}; /* ${p.role} */`).join('\n')}\n}`
+        : `colors: {\n${palette.map((p, i) => `  '${p.role || `c${i + 1}`}': '${p.hex.toUpperCase()}',`).join('\n')}\n}`
     void copyToClipboard(text)
-    toast.push(`${kind === 'ase' ? '.ase' : kind} copied`)
+    toast.push(`${kind === 'css' ? 'CSS' : 'Tailwind'} copied`)
   }
 
   return (
@@ -92,9 +90,9 @@ export function ImageDetail({
             type="button"
             className="stage-expand"
             onClick={() => setLightbox(true)}
-            title="Expand (zoom + pan)"
+            title="Open large preview (zoom + pan)"
           >
-            <I.Eye size={14} />
+            <I.Zoom size={14} />
           </button>
         )}
         <div className="detail-stage-head">
@@ -126,7 +124,11 @@ export function ImageDetail({
               >
                 <iframe
                   srcDoc={item.html}
-                  sandbox="allow-same-origin"
+                  // Untrusted model-generated HTML: fully sandboxed (opaque
+                  // origin, no scripts). Do NOT add allow-scripts — combined
+                  // with allow-same-origin it would let the frame reach the app
+                  // origin's storage + IPC bridge. Inline CSS still renders.
+                  sandbox=""
                   title={item.title}
                   style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
                 />
@@ -136,7 +138,12 @@ export function ImageDetail({
                 <img
                   src={item.screenshot}
                   alt={item.title}
-                  style={{ display: 'block', maxWidth: '100%' }}
+                  onClick={() => setLightbox(true)}
+                  style={{
+                    display: 'block',
+                    maxWidth: '100%',
+                    cursor: 'zoom-in'
+                  }}
                 />
               </div>
             ) : (
@@ -413,12 +420,6 @@ export function ImageDetail({
                   </Button>
                   <Button size="sm" onClick={() => exportAs('tailwind')}>
                     <I.Copy size={12} /> Tailwind
-                  </Button>
-                  <Button size="sm" onClick={() => exportAs('figma')}>
-                    <I.Copy size={12} /> Figma styles
-                  </Button>
-                  <Button size="sm" onClick={() => exportAs('ase')}>
-                    <I.Copy size={12} /> .ase
                   </Button>
                 </div>
               </div>

@@ -15,7 +15,17 @@ interface Pos {
 
 const MIN_SCALE = 0.1
 const MAX_SCALE = 8
+// Discrete step for +/- keys and the toolbar buttons.
 const ZOOM_STEP = 1.2
+// Wheel/trackpad sensitivity. Lower = slower zoom. We feed `deltaY` into
+// `exp(-deltaY * k)` so the same gesture maps to the same multiplicative
+// change regardless of how many ticks it arrived in. macOS trackpads emit
+// many small deltas (~1-4 per tick); a discrete `* 1.2` per tick was 4–6×
+// too fast under fingers.
+const WHEEL_SENSITIVITY = 0.0035
+// macOS reports trackpad pinch as wheel events with ctrlKey + a larger
+// per-event delta. Different sensitivity keeps pinch from overshooting.
+const PINCH_SENSITIVITY = 0.012
 
 export function Lightbox({
   src,
@@ -33,18 +43,6 @@ export function Lightbox({
   )
   const [dragging, setDragging] = useState(false)
   const imgRef = useRef<HTMLImageElement | null>(null)
-
-  // Esc closes; +/- keys zoom; 0 resets.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-      else if (e.key === '+' || e.key === '=') zoomBy(ZOOM_STEP)
-      else if (e.key === '-' || e.key === '_') zoomBy(1 / ZOOM_STEP)
-      else if (e.key === '0') reset()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   const zoomBy = (factor: number, originX?: number, originY?: number): void => {
     setScale((s) => {
@@ -68,10 +66,27 @@ export function Lightbox({
     setPos({ x: 0, y: 0 })
   }
 
+  // Esc closes; +/- keys zoom; 0 resets. Declared after zoomBy/reset so the
+  // key handler references them without a use-before-declaration.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === '+' || e.key === '=') zoomBy(ZOOM_STEP)
+      else if (e.key === '-' || e.key === '_') zoomBy(1 / ZOOM_STEP)
+      else if (e.key === '0') reset()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   const onWheel = (e: React.WheelEvent<HTMLDivElement>): void => {
-    // We intentionally don't preventDefault — React passive listener and
-    // anyway the dim layer doesn't scroll. Just compute the zoom.
-    const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP
+    // Continuous zoom: factor = exp(-deltaY * k) so that doubling the gesture
+    // length doubles the multiplicative zoom (zoom in then out by the same
+    // amount lands at the original scale). Clamping deltaY avoids "tossing"
+    // the image when the OS coalesces a fling into one giant event.
+    const k = e.ctrlKey ? PINCH_SENSITIVITY : WHEEL_SENSITIVITY
+    const clamped = Math.max(-80, Math.min(80, e.deltaY))
+    const factor = Math.exp(-clamped * k)
     zoomBy(factor, e.clientX, e.clientY)
   }
 

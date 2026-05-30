@@ -1,11 +1,54 @@
-// share.ts — talks to the pit.ink share Worker.
+import { randomBytes } from 'node:crypto'
+
+// share.ts — talks to a pit-share Worker (pit.ink by default, self-hosted if
+// configured in Settings → Sharing).
 // Takes a renderer item (or whole collection) and rewrites its data: URLs into
 // uploadable blobs, so the manifest persisted in D1 stays small and the images
 // land in R2 where the landing page can stream them.
 
-// Worker base URL — the custom-domain route pit.ink/api/* serves the same
-// pit-share-api Worker, so the app talks to one origin for everything.
-const SHARE_API_BASE = 'https://pit.ink'
+// Free service: pit.ink → strict 1 h expiry + 50 MB cap (enforced server-side).
+// Self-hosted: user's own Worker → caps come from their wrangler env.
+const PIT_INK_BASE = 'https://pit.ink'
+
+/** Reject a Worker base URL that would leak the bearer secret + share password
+ *  to an attacker/internal host. Remote hosts MUST use https (no cleartext
+ *  exfil); plain http is allowed only for a loopback dev worker. Throws on a
+ *  malformed or disallowed URL — surfaced to the user as a share error. */
+function assertSafeWorkerBase(base: string): void {
+  let u: URL
+  try {
+    u = new URL(base)
+  } catch {
+    throw new Error(`Invalid Worker URL: ${base.slice(0, 80)}`)
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+    throw new Error(`Worker URL must be http(s), got ${u.protocol}`)
+  }
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  const isLoopback = host === 'localhost' || host.startsWith('127.') || host === '::1'
+  if (u.protocol === 'http:' && !isLoopback) {
+    throw new Error(`Worker URL must use https:// (refusing to send credentials in cleartext to ${host})`)
+  }
+}
+
+/** Resolve the share Worker base URL + optional auth header from the override
+ *  the caller (main IPC) passed in. Trailing slashes / `/api` suffixes are
+ *  trimmed so callers can paste whatever they get from `wrangler deploy`. */
+function resolveConfig(override?: { workerUrl?: string; workerSecret?: string }): {
+  base: string
+  authHeader: Record<string, string>
+  isSelfHosted: boolean
+} {
+  const raw = override?.workerUrl?.trim()
+  const base = raw ? raw.replace(/\/+$/, '').replace(/\/api$/, '') : PIT_INK_BASE
+  assertSafeWorkerBase(base)
+  const secret = override?.workerSecret?.trim()
+  return {
+    base,
+    authHeader: secret ? { authorization: `Bearer ${secret}` } : {},
+    isSelfHosted: !!raw
+  }
+}
 
 interface ShareAsset {
   id: string
@@ -65,9 +108,18 @@ function dataUrlToAsset(dataUrl: string, baseId: string): ShareAsset | null {
  *
  * Per-page slices are dropped for now — the landing page can render from the
  * primary screenshot + prompt; uploading every slice would balloon the share.
+ *
+ * `assetSalt` is a per-share random token mixed into the asset ids of
+ * PASSWORD-PROTECTED shares. The R2 blob endpoint is unauthenticated and the
+ * default `item-<id>` ids are deterministic, so without the salt anyone holding
+ * the share code could stream the gated screenshots by guessing the item id.
+ * The salt lives only inside the (password-gated) manifest, so the asset URLs
+ * are unguessable to anyone who hasn't unlocked the share. Empty for public
+ * shares (no protection to defeat).
  */
-function stripItem(item: ItemLite, assets: ShareAsset[]): ItemLite {
+function stripItem(item: ItemLite, assets: ShareAsset[], assetSalt: string): ItemLite {
   const out: ItemLite = { ...item }
+  const suffix = assetSalt ? `-${assetSalt}` : ''
 
   // Drop fields that are local-only and would bloat the manifest:
   //   streamText      — live AI "thinking" stream, only useful in-flight
@@ -82,7 +134,7 @@ function stripItem(item: ItemLite, assets: ShareAsset[]): ItemLite {
   ;(out as Record<string, unknown>).error = undefined
 
   if (item.screenshot) {
-    const asset = dataUrlToAsset(item.screenshot, `item-${item.id}`)
+    const asset = dataUrlToAsset(item.screenshot, `item-${item.id}${suffix}`)
     if (asset) {
       assets.push(asset)
       out.screenshot = undefined
@@ -99,7 +151,7 @@ function stripItem(item: ItemLite, assets: ShareAsset[]): ItemLite {
           screenshot: undefined
         }
         if (p.screenshot) {
-          const a = dataUrlToAsset(p.screenshot, `item-${item.id}-page-${i}`)
+          const a = dataUrlToAsset(p.screenshot, `item-${item.id}-page-${i}${suffix}`)
           if (a) {
             assets.push(a)
             stripped.thumbAsset = a.id
@@ -126,9 +178,13 @@ export type ShareFetchResult =
  * discriminated union the renderer can switch on without re-handling fetch
  * errors.
  */
-export async function fetchShare(code: string): Promise<ShareFetchResult> {
+export async function fetchShare(
+  code: string,
+  override?: { workerUrl?: string; workerSecret?: string }
+): Promise<ShareFetchResult> {
+  const { base, authHeader } = resolveConfig(override)
   try {
-    const r = await fetch(`${SHARE_API_BASE}/api/shares/${code}`)
+    const r = await fetch(`${base}/api/shares/${code}`, { headers: authHeader })
     if (r.status === 404) return { status: 'not-found' }
     if (r.status === 410) return { status: 'expired' }
     if (r.status === 401) return { status: 'needs-password' }
@@ -142,12 +198,14 @@ export async function fetchShare(code: string): Promise<ShareFetchResult> {
 
 export async function authenticateShare(
   code: string,
-  password: string
+  password: string,
+  override?: { workerUrl?: string; workerSecret?: string }
 ): Promise<{ ok: true; payload: unknown } | { ok: false; error: string }> {
+  const { base, authHeader } = resolveConfig(override)
   try {
-    const r = await fetch(`${SHARE_API_BASE}/api/shares/${code}/auth`, {
+    const r = await fetch(`${base}/api/shares/${code}/auth`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeader },
       body: JSON.stringify({ password })
     })
     if (r.status === 403) return { ok: false, error: 'Wrong password' }
@@ -168,10 +226,12 @@ export async function authenticateShare(
  */
 export async function fetchAssetAsDataUrl(
   code: string,
-  asset: string
+  asset: string,
+  override?: { workerUrl?: string; workerSecret?: string }
 ): Promise<string | null> {
+  const { base, authHeader } = resolveConfig(override)
   try {
-    const r = await fetch(`${SHARE_API_BASE}/api/blob/${code}/${asset}`)
+    const r = await fetch(`${base}/api/blob/${code}/${asset}`, { headers: authHeader })
     if (!r.ok) return null
     const contentType = r.headers.get('content-type') || 'application/octet-stream'
     const buf = await r.arrayBuffer()
@@ -190,12 +250,20 @@ export async function fetchAssetAsDataUrl(
 
 // ─── outbound: creating shares ──────────────────────────────────────────
 
-export async function createShare(input: ShareCreateInput): Promise<ShareCreateResult> {
+export async function createShare(
+  input: ShareCreateInput,
+  override?: { workerUrl?: string; workerSecret?: string }
+): Promise<ShareCreateResult> {
+  const { base, authHeader, isSelfHosted } = resolveConfig(override)
   const sourceItems: ItemLite[] =
     input.kind === 'collection' ? input.items || [] : input.item ? [input.item] : []
 
   const assets: ShareAsset[] = []
-  const itemPayloads = sourceItems.map((it) => stripItem(it, assets))
+  // Password-protected shares get unguessable asset ids (the blob endpoint is
+  // unauthenticated, so deterministic `item-<id>` names would let anyone with
+  // the code bypass the password and stream the screenshots). See stripItem.
+  const assetSalt = input.password ? randomBytes(8).toString('hex') : ''
+  const itemPayloads = sourceItems.map((it) => stripItem(it, assets, assetSalt))
 
   const payload =
     input.kind === 'collection'
@@ -221,12 +289,12 @@ export async function createShare(input: ShareCreateInput): Promise<ShareCreateR
   }
   const manifestJson = JSON.stringify(manifestBody)
   process.stderr.write(
-    `[pit-share] manifest=${(manifestJson.length / 1024).toFixed(1)}KB ` +
+    `[pit-share] base=${base} self=${isSelfHosted} manifest=${(manifestJson.length / 1024).toFixed(1)}KB ` +
       `items=${sourceItems.length} blobs=${assets.length}\n`
   )
-  const res = await fetch(`${SHARE_API_BASE}/api/shares`, {
+  const res = await fetch(`${base}/api/shares`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...authHeader },
     body: manifestJson
   })
   if (!res.ok) {
@@ -248,10 +316,13 @@ export async function createShare(input: ShareCreateInput): Promise<ShareCreateR
         try {
           const bytes = Buffer.from(a.dataBase64, 'base64')
           const putRes = await fetch(
-            `${SHARE_API_BASE}/api/shares/${created.code}/blob/${encodeURIComponent(a.id)}`,
+            `${base}/api/shares/${created.code}/blob/${encodeURIComponent(a.id)}`,
             {
               method: 'PUT',
-              headers: { 'content-type': a.contentType || 'application/octet-stream' },
+              headers: {
+                'content-type': a.contentType || 'application/octet-stream',
+                ...authHeader
+              },
               body: bytes
             }
           )

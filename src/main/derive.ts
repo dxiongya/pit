@@ -12,7 +12,7 @@
 // design tokens + (palette override / content prompt). Output: single-file
 // HTML with inline CSS, no external CDN, ready for offline preview + screenshot.
 
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, session } from 'electron'
 import { callModel, type RoleRequest } from './ai'
 
 // ─── orchestrators — IPC-facing high-level helpers ─────────────────────
@@ -121,7 +121,7 @@ function shiftColor(hex: string, op: PaletteOp): string {
   const rgb = hexToRgb(hex)
   if (!rgb) return hex
   const hsl = rgbToHsl(rgb)
-  let next: HslColor = { ...hsl }
+  const next: HslColor = { ...hsl }
   switch (op.kind) {
     case 'hue': // rotate hue by op.deg degrees
       next.h = (hsl.h + op.deg + 360) % 360
@@ -301,12 +301,42 @@ function extractHtml(raw: string): string {
 
 // ─── HTML render → screenshot ─────────────────────────────────────────
 
+// The derivative HTML is untrusted model output. Two layers stop it from
+// beaconing out (e.g. a stray <img src=http://attacker> or <script>fetch()</script>)
+// while we render it for a thumbnail:
+//  1. a dedicated in-memory session that cancels every non-data: request, and
+//  2. a strict CSP injected into the document itself (no scripts, data:-only
+//     images/fonts), as defense-in-depth.
+const RENDER_PARTITION = 'derive-render'
+const RENDER_CSP =
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'"
+let renderNetBlocked = false
+
+function blockRenderNetwork(): void {
+  if (renderNetBlocked) return
+  session.fromPartition(RENDER_PARTITION).webRequest.onBeforeRequest((details, cb) => {
+    // Allow only the in-memory data: document; deny all real network egress.
+    cb({ cancel: !details.url.startsWith('data:') })
+  })
+  renderNetBlocked = true
+}
+
+/** Inject a strict CSP <meta> so untrusted HTML can't run scripts or load
+ *  external resources even if the network block ever has a gap. */
+function withCsp(html: string): string {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${RENDER_CSP}">`
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => m + meta)
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${meta}</head>`)
+  return meta + html
+}
+
 /**
  * Render an HTML string in a hidden BrowserWindow and capture a screenshot.
  * Returns a PNG data URL ready to store as the derivative's thumbnail.
  *
  * - Window is offscreen=false but show=false (Chromium throttling stays off,
  *   capturePage works) and sized to a desktop-typical 1280x800.
+ * - Network is blocked + a strict CSP is injected (untrusted model HTML).
  * - Uses loadURL('data:text/html;base64,…') so we don't need a tmp file.
  * - Waits for did-finish-load + a small settle delay so CSS/SVG/images paint
  *   before capture.
@@ -316,6 +346,7 @@ export async function captureHtml(
   width = 1280,
   height = 800
 ): Promise<string> {
+  blockRenderNetwork()
   const win = new BrowserWindow({
     width,
     height,
@@ -323,16 +354,19 @@ export async function captureHtml(
     frame: false,
     skipTaskbar: true,
     webPreferences: {
-      // No preload — derivative HTML is untrusted; isolate it.
+      // No preload — derivative HTML is untrusted; isolate it in a network-
+      // blocked partition.
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      offscreen: false
+      offscreen: false,
+      partition: RENDER_PARTITION
     }
   })
   try {
     const dataUrl =
-      'data:text/html;charset=utf-8;base64,' + Buffer.from(html, 'utf-8').toString('base64')
+      'data:text/html;charset=utf-8;base64,' +
+      Buffer.from(withCsp(html), 'utf-8').toString('base64')
     const loaded = new Promise<void>((resolve) => {
       const done = (): void => {
         win.webContents.off('did-finish-load', done)
