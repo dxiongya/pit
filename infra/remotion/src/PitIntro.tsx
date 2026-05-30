@@ -1,20 +1,13 @@
-// PitIntro — the full explainer, assembled as a Series of scenes.
-// Total = 90+90+150+180+150+120+150+90 = 1020 frames = 34s @ 30fps.
+// PitIntro — the full explainer. Hook + problem (motion graphics), the four
+// usage steps shown with REAL pit screenshots (demo.tsx), then direction + outro.
+// Total = 90+90+160+190+150+160+150+90 = 1080 frames = 36s @ 30fps.
 
 import React from 'react'
 import { AbsoluteFill, Series } from 'remotion'
-import {
-  AnalyzeScene,
-  CaptureScene,
-  CollectionsScene,
-  DirectionScene,
-  IntroScene,
-  OutroScene,
-  ProblemScene,
-  ShareScene
-} from './scenes'
+import { DirectionScene, IntroScene, OutroScene, ProblemScene } from './scenes'
+import { AnalyzeDemo, CaptureDemo, CollectionsDemo, ShareDemo } from './demo'
 
-export const PIT_INTRO_FRAMES = 1020
+export const PIT_INTRO_FRAMES = 1080
 
 export const PitIntro: React.FC = () => (
   <AbsoluteFill>
@@ -25,17 +18,17 @@ export const PitIntro: React.FC = () => (
       <Series.Sequence durationInFrames={90}>
         <ProblemScene />
       </Series.Sequence>
+      <Series.Sequence durationInFrames={160}>
+        <CaptureDemo />
+      </Series.Sequence>
+      <Series.Sequence durationInFrames={190}>
+        <AnalyzeDemo />
+      </Series.Sequence>
       <Series.Sequence durationInFrames={150}>
-        <CaptureScene />
+        <CollectionsDemo />
       </Series.Sequence>
-      <Series.Sequence durationInFrames={180}>
-        <AnalyzeScene />
-      </Series.Sequence>
-      <Series.Sequence durationInFrames={150}>
-        <CollectionsScene />
-      </Series.Sequence>
-      <Series.Sequence durationInFrames={120}>
-        <ShareScene />
+      <Series.Sequence durationInFrames={160}>
+        <ShareDemo />
       </Series.Sequence>
       <Series.Sequence durationInFrames={150}>
         <DirectionScene />

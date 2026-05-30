@@ -13,7 +13,11 @@ export default defineConfig(
       '**/out',
       // Catalog is auto-generated from yaml; scripts/ holds CommonJS build tools.
       'src/renderer/src/lib/catalog/catalog.ts',
-      'scripts/**'
+      'scripts/**',
+      // Standalone sub-project with its own toolchain — not part of the app's
+      // lint scope (Remotion has no Vite fast-refresh, so react-refresh rules
+      // don't apply to its component+hook modules).
+      'infra/remotion/**'
     ]
   },
   tseslint.configs.recommended,
