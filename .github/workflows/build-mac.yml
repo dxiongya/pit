@@ -1,0 +1,46 @@
+name: Build (macOS)
+
+# On-demand macOS packaging. Run it from the Actions tab (or via `gh workflow run
+# build-mac.yml`) to produce an installable .dmg without cutting a release. The
+# build is UNSIGNED (CSC_IDENTITY_AUTO_DISCOVERY=false) — first launch needs a
+# right-click → Open to clear Gatekeeper. Windows/Linux can be added later;
+# macOS first per request.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'build-mac-*'
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build & package macOS app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm run build:mac
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pit-macos-${{ github.sha }}
+          path: |
+            dist/*.dmg
+            dist/*-mac.zip
+          if-no-files-found: error
+          retention-days: 14
