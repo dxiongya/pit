@@ -1,5 +1,9 @@
 # pit
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="pit — a collection auto-routing new design references via its AI prompt" width="820" />
+</p>
+
 **A design-reference brain for people who build interfaces.** Capture anything that
 inspires you — a website, a screenshot, a tweet, a 小红书 note, a screen recording —
 and pit uses AI to read its _design_ (palette, type, components, layout, motion) into
