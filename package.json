@@ -1,6 +1,6 @@
 {
   "name": "pit",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Collect design references — capture links, images, and videos; AI extracts a DESIGN.md and routes them into collections.",
   "main": "./out/main/index.js",
   "author": "dxiongya",

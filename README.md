@@ -54,18 +54,59 @@ Grab the latest build from [Releases](https://github.com/dxiongya/pit/releases):
 
 ## Features
 
-1. **Link import** — paste a URL, capture each page, and extract a `DESIGN.md`
-   analysis (theme, palette & roles, typography, components, layout/IA, motion,
-   do/don't, responsive, a11y, agent prompt) following the
-   [awesome-design-md](https://github.com/VoltAgent/awesome-design-md) spec.
-2. **Image collection** — drop an image; pit extracts its palette, mood, materials,
-   and style, then suggests where it belongs.
-3. **Share** — public link + channel shortcuts, with an inline live preview.
-4. **Collections & routing** — custom collections, each with a free-form **prompt**
-   plus structured tags. The AI reads every collection's prompt to auto-route new
-   items. The New Collection builder shows a live preview of what would land there.
-5. **AI settings** — multi-provider, switchable: Anthropic / OpenAI / any
-   OpenAI-compatible endpoint (Ollama, vLLM…). Capture & routing feature toggles.
+### Capture anything
+
+- **Paste or drag** — `⌘V` or drag links, images, and videos in. pit detects the
+  type and even **pulls the link out of a whole copied share blob** (e.g. an X or
+  小红书 "share to…" message, not just a bare URL).
+- **Full-page website capture** — loads the page in a hidden window, dismisses
+  cookie/consent overlays, scrolls to trigger lazy content, and slices tall pages
+  into vision-safe segments via CDP.
+- **Source-level design harvest** — reads the _real_ design straight from the live
+  DOM/CSS: a quantized color palette, font families/sizes/weights, CSS
+  custom-property tokens, framework (React / Next / Vue / Svelte) + CSS-method
+  (Tailwind / styled-components / emotion) detection, and the logo SVG.
+- **Special sources** — first-class extractors for **X / Twitter** (text, author,
+  media) and **小红书 / Xiaohongshu** notes, with login-wall detection.
+- **Video & screen recording** — drop a video to auto-extract de-duplicated
+  keyframes (+ motion analysis), or use the built-in **screen recorder** (toolbar,
+  pause/resume, region picker) to capture UI flows straight into the library.
+- **Image groups** — combine related shots (variants, a flow, a moodboard) into one
+  item for batched analysis that finds the shared design language (up to 12).
+
+### AI that reads design
+
+- **DESIGN.md** — every item becomes a structured doc: theme, palette & roles,
+  typography, components, layout/IA, motion, accessibility, do/don'ts, plus a
+  _replica_ and an _apply-this-style_ agent prompt — grounded in the page's real
+  source, not guessed from a screenshot.
+- **Multi-provider** — Anthropic, OpenAI, Google, or any OpenAI-compatible endpoint
+  (Ollama, vLLM…), switchable per role. No key? pit still captures everything;
+  analysis falls back to a clearly-marked _Sample_ until you add one.
+- **Derive variants** — generate color/content variations of an analyzed design as
+  interactive HTML, saved alongside the original.
+
+### Organize without filing
+
+- **Collections that route themselves** — give a collection a plain-language
+  **prompt**; new items auto-route to the best match, with a live preview before you
+  save. Uncategorized items wait in **Inbox**.
+- **Find fast** — `⌘K` command palette + kind filters (sites / images / palettes /
+  fonts / …).
+
+### Share & hand off
+
+- **One link, just the good parts** — share a single item or a **hand-picked
+  subset** of a collection; optional password + expiry; live preview. Free
+  **pit.ink** links, or self-host the Cloudflare Worker for no limits.
+- **Readable by agents** — a built-in **MCP server** (stdio + HTTP) exposes your
+  library read-only to Claude and other agents.
+
+### Thoughtful by default
+
+First-run **onboarding tour** (reopen via the **?** in the top bar), light/dark +
+accent/density theming, `pit://` deep links, and an **SSRF guard** that refuses to
+fetch internal/loopback addresses from pasted URLs.
 
 ## Architecture
 
@@ -89,6 +130,8 @@ src/
     link-handlers/           Pluggable extractors: registry, twitter, xhs, generic
   preload/
     index.ts                 window.pit bridge — full typed IPC surface + streaming
+  shared/
+    ipc.ts                   Types shared across main / preload / renderer
   renderer/src/
     App.tsx                  Window shell + router + overlays
     styles/                  app.css design system + recorder.css
@@ -109,7 +152,7 @@ src/
 infra/                       Cloud (optional, for Share + MCP)
   cf-worker/                 Cloudflare Worker share API (D1 + R2)
   cf-pages/                  Public share viewer (pit.ink/p/:code)
-  mcp-server/                stdio MCP server exposing the local library read-only
+  mcp-server/                MCP server (stdio + Streamable HTTP) — library read-only to agents
 ```
 
 ### The AI / capture seam
